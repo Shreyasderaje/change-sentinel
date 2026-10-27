@@ -1,0 +1,13 @@
+# Change Sentinel — core dependencies
+# Verified with: streamlit 1.65.0, numpy 2.4.6, Pillow 12.2.0,
+# opencv-python-headless 4.13.0.92 (Python 3.11, Windows 64-bit).
+streamlit>=1.49
+numpy>=1.26
+Pillow>=10.0
+opencv-python-headless>=4.9
+
+# Optional geospatial extras — only needed for real geographic coordinates
+# from georeferenced GeoTIFF uploads and the interactive map view:
+# folium>=0.15
+# streamlit-folium>=0.20
+# rasterio>=1.3

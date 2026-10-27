@@ -36,6 +36,13 @@ from utils import report_generation as rg
 
 APP_NAME = "Change Sentinel"
 MAX_REGION_CROPS_SHOWN = 12
+VIEWS = [
+    "📤  Upload Images",
+    "📊  Detection Results",
+    "⌕  Candidate Regions",
+    "🗺️  Map View",
+    "▤  Analysis Report",
+]
 
 SAMPLE_DATA_DIR = Path(__file__).resolve().parent / "sample_data"
 
@@ -74,6 +81,88 @@ def get_analysis():
 def load_bytes(uploaded_file):
     data = uploaded_file.getvalue()
     return data, Path(uploaded_file.name).suffix.lower().lstrip(".")
+
+
+def _sync_navigation(source, target):
+    """Keep the compact top navigation and sidebar navigation in sync."""
+    st.session_state[target] = st.session_state[source]
+
+
+def inject_glass_theme():
+    """Apply the local Earth backdrop and shared glass-dashboard styling."""
+    image_path = Path(__file__).resolve().parent / "static" / "earth-at-night.png"
+    if not image_path.is_file():
+        raise FileNotFoundError(f"Required local dashboard background is missing: {image_path}")
+    background = "/app/static/earth-at-night.png"
+    st.markdown(
+        f"""<style>
+        :root {{
+          --cs-ink: #f3f8ff; --cs-muted: #a9bdd4; --cs-dim: #7891ae;
+          --cs-cyan: #63d9ff; --cs-blue: #398dff; --cs-border: rgba(110,190,255,.22);
+          --cs-glass: rgba(8,24,48,.68); --cs-glass-strong: rgba(8,25,51,.86);
+        }}
+        html, body {{ color: var(--cs-ink); background: #030b18; }}
+        [data-testid="stAppViewContainer"] {{
+          position:relative; min-height:100vh; background-color:#030b18;
+          background-image:url("{background}"); background-size:cover;
+          background-position:center 44%; background-attachment:fixed;
+        }}
+        [data-testid="stAppViewContainer"]::before {{
+          content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+          background:linear-gradient(110deg,rgba(2,9,22,.44),rgba(3,12,29,.22) 55%,rgba(3,12,28,.38));
+        }}
+        [data-testid="stHeader"] {{ background:rgba(4,13,27,.28); }}
+        [data-testid="stMain"] {{ position:relative; z-index:1; background:transparent; }}
+        [data-testid="stMainBlockContainer"] {{ max-width:1540px; padding-top:1.6rem; padding-bottom:2rem; }}
+        [data-testid="stSidebar"] {{ position:relative; z-index:2; height:100vh!important; height:100dvh!important; max-height:100dvh!important; overflow:hidden!important; background:rgba(4,15,33,.48); border-right:1px solid rgba(104,190,255,.24); }}
+        [data-testid="stSidebarContent"] {{ box-sizing:border-box; height:100%; max-height:100dvh; min-height:0; overflow-y:auto!important; overflow-x:hidden; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; scrollbar-gutter:stable; padding-top:.65rem; padding-bottom:calc(2rem + env(safe-area-inset-bottom)); background:linear-gradient(180deg,rgba(5,20,43,.70),rgba(5,16,34,.68)); backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); }}
+        [data-testid="stSidebar"] h2:first-of-type {{ display:none; }}
+        [data-testid="stVerticalBlockBorderWrapper"] {{ border:1px solid var(--cs-border)!important; border-radius:20px!important; background:linear-gradient(145deg,rgba(14,38,69,.74),rgba(7,22,45,.67))!important; box-shadow:0 14px 36px rgba(0,7,22,.26),inset 0 1px rgba(255,255,255,.055); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); transition:border-color .2s ease,box-shadow .2s ease,transform .2s ease; }}
+        [data-testid="stVerticalBlockBorderWrapper"]:hover {{ border-color:rgba(91,205,255,.38)!important; box-shadow:0 16px 40px rgba(0,7,22,.32),0 0 22px rgba(35,144,255,.08),inset 0 1px rgba(255,255,255,.07); }}
+        h1,h2,h3,h4 {{ color:#f4f8ff!important; letter-spacing:-.025em; }}
+        h1 {{ font-size:clamp(2rem,3vw,3.1rem)!important; font-weight:720!important; }}
+        h2 {{ font-size:1.55rem!important; }} h3 {{ font-size:1.15rem!important; }}
+        p,li,[data-testid="stMarkdownContainer"] {{ color:#dce8f7; }}
+        [data-testid="stCaptionContainer"], [data-testid="stWidgetLabel"] p {{ color:var(--cs-muted)!important; }}
+        [data-testid="stMetric"] {{ padding:16px 18px; border:1px solid rgba(104,190,255,.19); border-radius:16px; background:linear-gradient(145deg,rgba(17,47,82,.67),rgba(8,25,49,.72)); box-shadow:inset 0 1px rgba(255,255,255,.045); }}
+        [data-testid="stMetricLabel"] {{ color:var(--cs-muted)!important; }} [data-testid="stMetricValue"] {{ color:#f4f9ff!important; }}
+        [data-testid="stImage"] img {{ border-radius:13px; border:1px solid rgba(125,190,255,.20); }}
+        [data-testid="stFileUploader"] section {{ border:1px dashed rgba(99,192,255,.46); border-radius:14px; background:rgba(9,28,53,.56); transition:border-color .2s,background .2s; }}
+        [data-testid="stFileUploader"] section:hover {{ border-color:var(--cs-cyan); background:rgba(12,43,75,.7); }}
+        [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {{ background:rgba(4,17,36,.70); color:var(--cs-ink); border:1px solid rgba(117,177,229,.27); border-radius:10px; }}
+        [data-testid="stTextInput"] input:focus {{ border-color:var(--cs-cyan); box-shadow:0 0 0 2px rgba(69,188,255,.16); }}
+        [data-testid="stButton"] button, [data-testid="stDownloadButton"] button {{ border:1px solid rgba(116,190,255,.28); background:rgba(16,44,77,.68); color:#eaf6ff; border-radius:11px; min-height:2.65rem; transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease,filter .18s ease; }}
+        [data-testid="stButton"] button:hover, [data-testid="stDownloadButton"] button:hover {{ border-color:rgba(99,217,255,.76); box-shadow:0 0 18px rgba(42,160,255,.20); transform:translateY(-1px); color:#fff; }}
+        [data-testid="stButton"] button:active, [data-testid="stDownloadButton"] button:active {{ transform:translateY(0) scale(.99); }}
+        [data-testid="stButton"] button[kind="primary"], [data-testid="stDownloadButton"] button[kind="primary"] {{ color:white; border:1px solid rgba(122,224,255,.65); background:linear-gradient(100deg,#176cff,#12b8ed); box-shadow:0 8px 24px rgba(18,117,255,.28),inset 0 1px rgba(255,255,255,.24); font-weight:700; }}
+        [data-testid="stAlert"] {{ border-radius:13px; background:rgba(7,28,52,.80); border:1px solid rgba(111,182,241,.23); }}
+        [data-testid="stDataFrame"] {{ border:1px solid rgba(110,190,255,.20); border-radius:12px; overflow:hidden; }}
+        [data-testid="stExpander"] {{ border:1px solid rgba(110,190,255,.20); border-radius:13px; background:rgba(8,24,46,.58); }}
+        [data-testid="stRadio"] > div {{ gap:.35rem; }}
+        [data-testid="stRadio"] label {{ border:1px solid rgba(107,174,227,.18); border-radius:12px; padding:.55rem .75rem; background:rgba(8,27,52,.43); transition:all .18s ease; }}
+        [data-testid="stRadio"] label:hover {{ border-color:rgba(98,208,255,.48); background:rgba(25,71,112,.46); }}
+        [data-testid="stRadio"] label:has(input:checked) {{ border-color:rgba(80,203,255,.70); background:linear-gradient(100deg,rgba(26,102,217,.44),rgba(14,155,195,.30)); box-shadow:0 0 18px rgba(31,145,255,.15),inset 0 1px rgba(255,255,255,.1); }}
+        [data-testid="stRadio"] input {{ accent-color:#48cfff; }}
+        [data-testid="stSlider"] [role="slider"] {{ background:#65d9ff; }}
+        [data-testid="stCheckbox"] label {{ color:#e6f1ff!important; }}
+        [data-testid="stMarkdownContainer"] a {{ color:#72d8ff; }}
+        [data-testid="stMarkdownContainer"] code {{ background:rgba(2,14,30,.70); color:#aee8ff; }}
+        .cs-brand {{ display:flex;align-items:center;gap:13px;margin:.3rem 0 .2rem; }}
+        .cs-brand-icon {{ width:54px;height:54px;display:grid;place-items:center;border-radius:17px;background:linear-gradient(145deg,rgba(26,117,225,.42),rgba(21,203,226,.15));border:1px solid rgba(113,218,255,.48);box-shadow:0 0 28px rgba(23,134,255,.25),inset 0 1px rgba(255,255,255,.19);font-size:27px; }}
+        .cs-eyebrow {{ color:#75d9ff;font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;font-weight:700; }}
+        .cs-subtitle {{ color:#b7cbe0;font-size:1.02rem;margin:.35rem 0 .35rem; }}
+        .cs-badges {{ display:flex;flex-wrap:wrap;gap:8px;margin:.7rem 0 1rem; }}
+        .cs-badge {{ padding:6px 11px;border-radius:999px;border:1px solid rgba(107,196,255,.29);background:rgba(8,33,60,.62);color:#ccecff;font-size:.76rem;letter-spacing:.02em; }}
+        .cs-badge.status {{ border-color:rgba(59,224,178,.34);color:#8cf2d1;background:rgba(7,65,60,.34); }}
+        .cs-note {{ color:#b9cde2;font-size:.88rem;line-height:1.55; }}
+        .cs-fade {{ animation:cs-fade-in .42s ease both; }}
+        @keyframes cs-fade-in {{ from {{opacity:0;transform:translateY(6px)}} to {{opacity:1;transform:translateY(0)}} }}
+        @media(max-width:900px) {{ [data-testid="stMainBlockContainer"] {{padding:1rem 1rem 1.5rem}} [data-testid="stMetric"] {{padding:12px}} }}
+        @media(max-width:640px) {{ [data-testid="stMainBlockContainer"] {{padding:.8rem .7rem 1.2rem}} [data-testid="stRadio"] > div {{gap:.15rem;flex-wrap:wrap}} [data-testid="stRadio"] label {{padding:.42rem .48rem;font-size:.78rem}} .cs-brand-icon {{width:46px;height:46px}} }}
+        @media(prefers-reduced-motion:reduce) {{ *,*::before,*::after {{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}} }}
+        </style>""",
+        unsafe_allow_html=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -228,13 +317,30 @@ def run_demo(kind: str):
 
 def render_sidebar():
     with st.sidebar:
+        st.markdown(
+            '<div class="cs-brand"><div class="cs-brand-icon">🛰️</div>'
+            '<div><div style="font-size:1.08rem;font-weight:750;color:#f4f8ff">Change Sentinel</div>'
+            '<div style="font-size:.76rem;color:#a9bdd4">Geospatial intelligence</div></div></div>',
+            unsafe_allow_html=True,
+        )
         st.header(f"🛰️ {APP_NAME}")
         st.caption(
             "Satellite / aerial imagery change-detection review dashboard "
             "(prototype)."
         )
 
-        st.subheader("Demo data")
+        st.markdown("---")
+        st.markdown("**WORKSPACE**")
+        st.radio(
+            "Workspace navigation",
+            VIEWS,
+            key="sidebar_nav",
+            label_visibility="collapsed",
+            on_change=_sync_navigation,
+            args=("sidebar_nav", "main_nav"),
+        )
+        st.markdown("---")
+        st.subheader("Synthetic demo data")
         st.caption(
             "Loads bundled images that are **synthetic** — they mimic an "
             "aerial view but are not real satellite imagery."
@@ -302,7 +408,7 @@ def render_sidebar():
 # ---------------------------------------------------------------------------
 
 def render_upload_tab():
-    st.subheader("Upload images")
+    st.subheader("Upload image pair")
     st.markdown(
         "Upload an **earlier** image and a **later** image of the "
         "**same area**. Supported formats: JPG, JPEG, PNG and GeoTIFF."
@@ -363,6 +469,22 @@ def render_upload_tab():
             show_image(after_raw, caption="After (preview)")
         except ip.ImageValidationError as exc:
             st.error(f"After image: {exc}")
+
+    with st.container(border=True):
+        st.markdown("#### Preview comparison")
+        st.caption("A side-by-side view of the actual decoded uploads. No imagery is substituted.")
+        if before_raw is not None and after_raw is not None:
+            preview_before, preview_after = st.columns(2)
+            with preview_before:
+                show_image(before_raw, caption="Before image")
+            with preview_after:
+                show_image(after_raw, caption="After image")
+        else:
+            st.markdown(
+                '<div class="cs-note">Upload both source images to see the comparison preview here. '
+                'Synthetic demo imagery is available from the sidebar and is clearly labeled.</div>',
+                unsafe_allow_html=True,
+            )
 
     if before_raw is not None and after_raw is not None:
         for note in ip.compare_dimensions(before_raw, after_raw):
@@ -656,44 +778,45 @@ def render_report_tab():
 
 def main():
     st.set_page_config(
-        page_title=f"{APP_NAME} — Change Detection",
+        page_title=f"{APP_NAME} - Change Detection",
         page_icon="🛰️",
         layout="wide",
+        initial_sidebar_state="expanded",
     )
-
-    st.title(f"🛰️ {APP_NAME}")
-    st.caption(
-        "Compare two images of the same area, review **candidate** visual "
-        "changes, and export a report. Prototype — outputs require human "
-        "verification."
+    inject_glass_theme()
+    st.session_state.setdefault("sidebar_nav", VIEWS[0])
+    st.session_state.setdefault("main_nav", st.session_state["sidebar_nav"])
+    st.markdown(
+        '<div class="cs-fade"><div class="cs-brand"><div class="cs-brand-icon">&#128752;</div><div>'
+        '<div class="cs-eyebrow">Space &amp; Defence Tech</div>'
+        '<h1 style="margin:2px 0 0;font-size:clamp(2rem,3vw,3.1rem)">Change Sentinel</h1>'
+        '</div></div><div class="cs-subtitle">AI-Powered Satellite Imagery Change Detection</div>'
+        '<div class="cs-note">Compare two captures of the same area, inspect candidate visual differences, '
+        'and prepare a traceable report for human review.</div>'
+        '<div class="cs-badges"><span class="cs-badge">Space &amp; Defence Tech</span>'
+        '<span class="cs-badge">HackFront India 2026</span>'
+        '<span class="cs-badge status">&#9679; Prototype - Human review required</span></div></div>',
+        unsafe_allow_html=True,
     )
-
     render_sidebar()
-
-    tab_upload, tab_results, tab_regions, tab_map, tab_report = st.tabs(
-        [
-            "📤 Upload Images",
-            "📊 Detection Results",
-            "🔎 Candidate Regions",
-            "🗺️ Map",
-            "📄 Report",
-        ]
+    st.radio(
+        "Dashboard navigation", VIEWS, horizontal=True, key="main_nav",
+        label_visibility="collapsed", on_change=_sync_navigation,
+        args=("main_nav", "sidebar_nav"),
     )
-
-    with tab_upload:
+    selected = st.session_state["main_nav"]
+    if selected == VIEWS[0]:
         render_upload_tab()
-    with tab_results:
+    elif selected == VIEWS[1]:
         render_results_tab()
-    with tab_regions:
+    elif selected == VIEWS[2]:
         render_regions_tab()
-    with tab_map:
+    elif selected == VIEWS[3]:
         render_map_tab()
-    with tab_report:
+    else:
         render_report_tab()
-
     st.divider()
     st.caption(DISCLAIMER)
-
 
 if __name__ == "__main__":
     main()

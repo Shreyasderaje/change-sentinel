@@ -83,6 +83,50 @@ streamlit run app.py
 
 The browser opens at `http://localhost:8501`.
 
+## Next.js frontend and FastAPI service
+
+The Streamlit app remains available as above. The same repository also
+contains a separate FastAPI service used by the Next.js dashboard.
+
+```bash
+# From the repository root, install the added API dependencies with the
+# existing Python requirements, then start the API:
+python -m pip install -r requirements.txt
+uvicorn api:app --reload --port 8000
+```
+
+The API exposes `GET /health` and `POST /analyze`. Analysis uploads use
+multipart fields `before` and `after`; optional settings are `threshold`,
+`min_region_area`, `max_size`, and `attempt_alignment`. Each image is limited
+to 20 MB and 40 megapixels. Set `CORS_ORIGINS` to a comma-separated list of
+allowed browser origins (for example `http://localhost:3000` locally). In a
+deployed API, set this to the exact Vercel frontend origin.
+
+In a second terminal:
+
+```bash
+cd frontend
+# Set NEXT_PUBLIC_API_URL=http://localhost:8000 in frontend/.env.local
+npm install
+npm run dev
+```
+
+Run the backend API tests and frontend checks with:
+
+```bash
+python -m pytest
+cd frontend
+npm run typecheck
+npm run build
+```
+
+For Render, create a **separate** web service from this repository for the
+API, with start command `uvicorn api:app --host 0.0.0.0 --port $PORT`, and
+set `CORS_ORIGINS` to the Vercel production origin. Keep the existing
+Streamlit Render service pointed at `streamlit run app.py`. Set
+`NEXT_PUBLIC_API_URL` in Vercel to the new API service URL and redeploy the
+frontend after configuration.
+
 ### Try it in 30 seconds
 
 1. Click **"Load synthetic demo pair (with changes)"** in the sidebar.

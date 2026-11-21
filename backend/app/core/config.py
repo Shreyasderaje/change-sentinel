@@ -1,6 +1,7 @@
 
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,12 @@ class Settings(BaseSettings):
 
     # Application environment
     environment: str = "development"
+
+    # Sarvam credentials and model selection (server-side only)
+    sarvam_api_key: SecretStr | None = None
+    sarvam_stt_model: str = "saaras:v4"
+    sarvam_chat_model: str = "sarvam-105b"
+    sarvam_timeout_seconds: float = 30.0
 
     def validate_security(self):
         if self.environment != "development":

@@ -13,17 +13,36 @@ services:
       timeout: 5s
       retries: 10
     # Database is not exposed to the host or public internet.
-  api:
-    build: .
+  migrate:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: ["alembic", "upgrade", "head"]
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql+psycopg://sentinel:${POSTGRES_PASSWORD}@db:5432/sentinel
+      DATABASE_URL: postgresql+pg8000://sentinel:${POSTGRES_PASSWORD}@db:5432/sentinel
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS}
-    ports:
-      - '127.0.0.1:8000:8000'
     depends_on:
       db:
         condition: service_healthy
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+pg8000://sentinel:${POSTGRES_PASSWORD}@db:5432/sentinel
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS}
+      SARVAM_API_KEY: ${SARVAM_API_KEY:-}
+      SARVAM_STT_MODEL: ${SARVAM_STT_MODEL:-saaras:v4}
+      SARVAM_CHAT_MODEL: ${SARVAM_CHAT_MODEL:-sarvam-105b}
+      SARVAM_TIMEOUT_SECONDS: ${SARVAM_TIMEOUT_SECONDS:-30}
+    ports:
+      - '127.0.0.1:8000:8000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 volumes:
   db_data:

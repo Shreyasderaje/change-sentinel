@@ -93,6 +93,36 @@ _AUDIO_TYPES = {
     ".webm": {"audio/webm", "application/octet-stream"},
     ".pcm": {"audio/pcm", "application/octet-stream"},
 }
+_AUDIO_DETECTED_TYPES = {
+    ".wav": {"audio/wav", "audio/x-wav", "audio/wave"},
+    ".mp3": {"audio/mpeg", "audio/mp3"},
+    ".aac": {"audio/aac", "audio/aacp"},
+    ".aiff": {"audio/aiff", "audio/x-aiff"},
+    ".aif": {"audio/aiff", "audio/x-aiff"},
+    ".ogg": {"audio/ogg", "application/ogg"},
+    ".opus": {"audio/ogg", "application/ogg", "audio/opus"},
+    ".flac": {"audio/flac", "audio/x-flac"},
+    ".m4a": {"audio/mp4", "audio/x-m4a"},
+    ".mp4": {"audio/mp4", "video/mp4"},
+    ".amr": {"audio/amr"},
+    ".wma": {"audio/x-ms-wma", "audio/wma", "video/x-ms-asf"},
+    ".webm": {"audio/webm"},
+}
+_AUDIO_DETECTED_CLASSES = {
+    ".wav": {"WAVE"},
+    ".mp3": {"MP3"},
+    ".aac": {"AAC"},
+    ".aiff": {"AIFF"},
+    ".aif": {"AIFF"},
+    ".ogg": {"OggVorbis", "OggFLAC", "OggSpeex"},
+    ".opus": {"OggOpus"},
+    ".flac": {"FLAC"},
+    ".m4a": {"MP4"},
+    ".mp4": {"MP4"},
+    ".amr": {"AMR"},
+    ".wma": {"ASF"},
+    ".webm": {"WebM"},
+}
 _TRANSCRIPTION_MODES = {"transcribe", "translate", "verbatim", "translit", "codemix"}
 _ALLOWED_LANGUAGES = {
     "unknown", "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN",
@@ -151,6 +181,7 @@ def _validate_audio(audio_bytes: bytes, filename: str, content_type: str) -> tup
         raise SarvamInputError("Audio content type does not match the file format.")
 
     duration: float | None = None
+    media = None
     if ext == ".pcm":
         # PCM REST input must be 16 kHz. Without a specified codec/channel count,
         # duration cannot safely be inferred from a filename or MIME type.
@@ -166,6 +197,14 @@ def _validate_audio(audio_bytes: bytes, filename: str, content_type: str) -> tup
                 duration = wav_file.getnframes() / float(wav_file.getframerate())
         except (wave.Error, EOFError, ZeroDivisionError):
             duration = None
+    if media is None:
+        raise SarvamInputError("Audio file is invalid or its format could not be verified.")
+    detected_mimes = set(getattr(media, "mime", ()) or ())
+    if (
+        type(media).__name__ not in _AUDIO_DETECTED_CLASSES.get(ext, set())
+        or not detected_mimes.intersection(_AUDIO_DETECTED_TYPES.get(ext, set()))
+    ):
+        raise SarvamInputError("Detected audio format does not match the filename extension.")
     if duration is None:
         raise SarvamInputError("Audio file is invalid or its duration could not be verified.")
     if duration <= 0 or duration > 30:

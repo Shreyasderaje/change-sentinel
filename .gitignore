@@ -4,3 +4,10 @@ __pycache__/
 venv/
 .pytest_cache/
 .streamlit/secrets.toml
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
+# Local audio test recordings
+/test_audio/

@@ -52,7 +52,11 @@ def add_member(
             409, "Project owner already has access"
         )
 
-    member = db.get(User, payload.user_id)
+    member = db.execute(
+        select(User.id, User.role, User.active).where(
+            User.id == payload.user_id
+        )
+    ).one_or_none()
 
     if (
         member is None

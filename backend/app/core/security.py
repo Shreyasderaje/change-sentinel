@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import get_db, bind_user_identity
 from app.models import User
 
 bearer = HTTPBearer(auto_error=False)
@@ -33,10 +33,33 @@ def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bear
     error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid or missing credentials', headers={'WWW-Authenticate':'Bearer'})
     if not credentials: raise error
     try:
-        claims = jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[get_settings().jwt_algorithm])
+        claims = jwt.decode(
+            credentials.credentials,
+            get_settings().jwt_secret,
+            algorithms=[get_settings().jwt_algorithm],
+            options={"require": ["sub", "exp"]},
+        )
         subject = claims.get('sub')
-        if not isinstance(subject, str): raise error
-        user = db.get(User, subject)
+        if (
+            not isinstance(subject, str)
+            or not subject.strip()
+            or len(subject) > 36
+        ):
+            raise error
+        bind_user_identity(db, subject)
+        user = db.get(
+            User,
+            subject,
+            options=(
+                load_only(
+                    User.id,
+                    User.email,
+                    User.role,
+                    User.active,
+                    raiseload=True,
+                ),
+            ),
+        )
         if user is None or not user.active: raise error
         return user
     except jwt.PyJWTError: raise error

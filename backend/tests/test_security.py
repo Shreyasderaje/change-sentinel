@@ -2170,3 +2170,74 @@ def test_complete_change_sentinel_workflow(
     assert client.get(
         f"/api/v1/analyses/{aid}/report"
     ).status_code == 401
+
+
+# Additional JWT security regression tests
+
+def test_token_without_expiration_is_rejected():
+    _, _, valid_token = create_test_account()
+
+    profile = client.get(
+        "/api/v1/auth/me",
+        headers={
+            "Authorization": f"Bearer {valid_token}"
+        },
+    )
+
+    assert profile.status_code == 200
+
+    settings = get_settings()
+
+    token = jwt.encode(
+        {"sub": profile.json()["id"]},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_token_without_subject_is_rejected():
+    settings = get_settings()
+
+    token = jwt.encode(
+        {
+            "exp": datetime.now(timezone.utc)
+                   + timedelta(minutes=5)
+        },
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_token_with_empty_subject_is_rejected():
+    settings = get_settings()
+
+    token = jwt.encode(
+        {
+            "sub": "",
+            "exp": datetime.now(timezone.utc)
+                   + timedelta(minutes=5)
+        },
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401

@@ -193,7 +193,11 @@ def assign_investigation(
             409, "Only open investigations can be assigned"
         )
 
-    officer = db.get(User, payload.assigned_to_id)
+    officer = db.execute(
+        select(User.id, User.role, User.active).where(
+            User.id == payload.assigned_to_id
+        )
+    ).one_or_none()
 
     if officer is None or officer.role != "officer" or not officer.active:
         raise HTTPException(404, "Eligible officer not found")

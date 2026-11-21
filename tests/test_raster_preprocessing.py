@@ -1,212 +1,259 @@
-"""Tests for raster preprocessing and alignment."""
+"""Tests for raster grid validation, reprojection, and image passthrough."""
+
 import io
 
 import numpy as np
 import pytest
 
+import rasterio
+from rasterio.crs import CRS
+from rasterio.transform import from_origin, from_bounds
+from rasterio.warp import transform_bounds
+
 from utils import geospatial
-from utils.geospatial import check_compatibility, reproject_raster, preprocess_raster_pair
+from utils.geospatial import check_compatibility, preprocess_raster_pair, reproject_raster
 
 
-def make_rgb(height=128, width=128, seed=0):
-    rng = np.random.default_rng(seed)
-    base = np.zeros((height, width, 3), dtype=np.int16)
-    base[...] = (100, 120, 140)
-    noise = rng.integers(-8, 9, size=(height, width, 3), dtype=np.int16)
-    return np.clip(base + noise, 0, 255).astype(np.uint8)
-
-
-def geotiff_bytes(array, crs="EPSG:32643", transform=None):
-    """Encode an RGB array as a georeferenced GeoTIFF in memory."""
-    import rasterio
-    from rasterio.transform import from_origin, Affine
-
+def geotiff_bytes(data, *, crs="EPSG:32643", transform=None, nodata=None, tags=None):
+    """Create a TIFF from (bands, height, width) data or RGB (height,width,3)."""
+    data = np.asarray(data)
+    if data.ndim == 2:
+        data = data[np.newaxis, ...]
+    elif data.ndim == 3 and data.shape[-1] in (3, 4):
+        data = data.transpose(2, 0, 1)
     if transform is None:
         transform = from_origin(760000.0, 1430000.0, 10.0, 10.0)
-    # Convert tuple transform to Affine if needed
-    if isinstance(transform, tuple):
-        transform = Affine(*transform)
-    buffer = io.BytesIO()
     with rasterio.MemoryFile() as memory:
         with memory.open(
-            driver="GTiff",
-            height=array.shape[0],
-            width=array.shape[1],
-            count=3,
-            dtype="uint8",
-            crs=crs,
-            transform=transform,
+            driver="GTiff", height=data.shape[1], width=data.shape[2],
+            count=data.shape[0], dtype=data.dtype, crs=crs,
+            transform=transform, nodata=nodata,
         ) as dataset:
-            dataset.write(array[:, :, 0], 1)
-            dataset.write(array[:, :, 1], 2)
-            dataset.write(array[:, :, 2], 3)
-        buffer.write(memory.read())
-    return buffer.getvalue()
+            dataset.write(data)
+            if tags:
+                dataset.update_tags(**tags)
+        return memory.read()
 
 
-def spatial_info(
-    *,
-    crs="EPSG:32643",
-    width=128,
-    height=128,
-    transform=(10.0, 0.0, 760000.0, 0.0, -10.0, 1430000.0),
-):
-    """Build georeference metadata without requiring the optional rasterio package."""
-    a, b, c, d, e, f = transform
-    corners = [
-        (c, f),
-        (a * width + c, d * width + f),
-        (b * height + c, e * height + f),
-        (a * width + b * height + c, d * width + e * height + f),
-    ]
-    return {
-        "crs": crs,
-        "crs_obj": crs,
-        "transform": transform,
-        "width": width,
-        "height": height,
-        "bounds": (
-            min(point[0] for point in corners),
-            min(point[1] for point in corners),
-            max(point[0] for point in corners),
-            max(point[1] for point in corners),
-        ),
+def read_tiff(payload):
+    with rasterio.MemoryFile(payload) as memory, memory.open() as dataset:
+        return dataset
+
+
+def rgb(height=128, width=128, seed=7):
+    rng = np.random.default_rng(seed)
+    return rng.integers(0, 255, (height, width, 3), dtype=np.uint8)
+
+
+def test_check_compatibility_preserves_ordinary_pairs_and_rejects_mixed():
+    assert check_compatibility(None, None, False, False)["compatible"] is True
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        check_compatibility(None, None, True, False)
+    assert err.value.code == "unsupported_input_pair"
+
+
+def test_same_grid_pair_is_preserved_without_reprojection(monkeypatch):
+    payload = geotiff_bytes(rgb())
+    monkeypatch.setattr(geospatial, "reproject_raster", lambda *a, **k: pytest.fail("unneeded reprojection"))
+    result = preprocess_raster_pair(payload, payload)
+    assert result["after"] == payload
+    assert result["before"] == payload
+    assert result["reference_info"]["width"] == 128
+    assert "no reprojection" in result["note"]
+
+
+@pytest.mark.parametrize(
+    "shape,transform",
+    [((3, 64, 64), from_origin(760000, 1430000, 20, 20)),
+     ((3, 256, 256), from_origin(760000, 1430000, 5, 5))],
+)
+def test_different_dimensions_and_resolutions_align_to_before(shape, transform):
+    before = geotiff_bytes(rgb(128, 128), transform=from_origin(760000, 1430000, 10, 10))
+    after = geotiff_bytes(np.ones(shape, dtype=np.uint8), transform=transform)
+    aligned = preprocess_raster_pair(before, after)
+    with rasterio.MemoryFile(aligned["after"]) as memory, memory.open() as dataset:
+        with rasterio.MemoryFile(before) as before_memory, before_memory.open() as reference:
+            assert (dataset.width, dataset.height) == (reference.width, reference.height)
+            assert dataset.transform == reference.transform
+            assert dataset.crs == reference.crs
+
+
+def test_different_crs_is_reprojected_not_rejected():
+    before_transform = from_origin(760000, 1430000, 10, 10)
+    before = geotiff_bytes(rgb(), crs="EPSG:32643", transform=before_transform)
+    left, bottom, right, top = transform_bounds(
+        "EPSG:32643", "EPSG:4326", 760000, 1428720, 761280, 1430000, densify_pts=21
+    )
+    after = geotiff_bytes(
+        np.ones((3, 64, 64), dtype=np.uint8), crs="EPSG:4326",
+        transform=from_bounds(left, bottom, right, top, 64, 64),
+    )
+    result = preprocess_raster_pair(before, after)
+    with rasterio.MemoryFile(result["after"]) as memory, memory.open() as aligned:
+        assert aligned.crs == CRS.from_epsg(32643)
+        assert (aligned.width, aligned.height) == (128, 128)
+        assert aligned.transform == before_transform
+
+
+def test_reproject_preserves_all_bands_dtype_nodata_and_metadata():
+    data = np.arange(4 * 32 * 32, dtype=np.uint16).reshape(4, 32, 32)
+    data[:, 0, 0] = 65535
+    source = geotiff_bytes(data, nodata=65535, tags={"sensor": "test-sensor"})
+    target_transform = from_origin(760000, 1430000, 10, 10)
+    output = reproject_raster(
+        source, "EPSG:32643", target_transform, (10, 10),
+        target_width=32, target_height=32, resampling="nearest",
+    )
+    with rasterio.MemoryFile(output) as memory, memory.open() as result:
+        assert result.count == 4
+        assert result.dtypes == ("uint16",) * 4
+        assert result.nodata == 65535
+        assert result.transform == target_transform
+        assert (result.width, result.height) == (32, 32)
+        assert result.tags()["sensor"] == "test-sensor"
+        np.testing.assert_array_equal(result.read(), data)
+
+
+@pytest.mark.parametrize("dimension_name", ["target_width", "target_height"])
+def test_partial_target_dimensions_are_rejected(dimension_name):
+    kwargs = {dimension_name: 64}
+    with pytest.raises(geospatial.SpatialInputError, match="provided together") as err:
+        reproject_raster(
+            geotiff_bytes(rgb()), "EPSG:32643", from_origin(760000, 1430000, 10, 10),
+            (10, 10), **kwargs,
+        )
+    assert err.value.code == "invalid_dimensions"
+
+
+@pytest.mark.parametrize("method", ["nearest", "bilinear", "cubic", "mode", "average"])
+def test_supported_resampling_methods(method):
+    source = geotiff_bytes(rgb())
+    output = reproject_raster(
+        source, "EPSG:32643", from_origin(760000, 1430000, 10, 10), (10, 10),
+        target_width=128, target_height=128, resampling=method,
+    )
+    with rasterio.MemoryFile(output) as memory, memory.open() as dataset:
+        assert dataset.width == 128
+
+
+def test_bilinear_resamples_between_resolutions():
+    source = geotiff_bytes(rgb(64, 64), transform=from_origin(760000, 1430000, 20, 20))
+    output = reproject_raster(
+        source, "EPSG:32643", from_origin(760000, 1430000, 10, 10), (10, 10),
+        target_width=128, target_height=128, resampling="bilinear",
+    )
+    with rasterio.MemoryFile(output) as memory, memory.open() as dataset:
+        assert (dataset.width, dataset.height) == (128, 128)
+
+
+def test_dimensions_derived_on_grid_anchored_to_transform():
+    source = geotiff_bytes(rgb(40, 60), transform=from_origin(760003, 1430007, 10, 10))
+    output = reproject_raster(
+        source, "EPSG:32643", from_origin(760000, 1430010, 20, 20), (20, 20)
+    )
+    with rasterio.MemoryFile(output) as memory, memory.open() as dataset:
+        assert dataset.width > 0 and dataset.height > 0
+        assert (dataset.transform.c - 760000) % 20 == pytest.approx(0)
+        assert (1430010 - dataset.transform.f) % 20 == pytest.approx(0)
+
+
+def test_rotated_sheared_target_grid_preserves_transform_and_dimensions():
+    target_transform = rasterio.Affine(10, 2, 760000, 1, -10, 1430000)
+    output = reproject_raster(
+        geotiff_bytes(rgb(32, 32)), "EPSG:32643", target_transform,
+        (np.hypot(10, 1), np.hypot(2, -10)), target_width=23, target_height=17,
+    )
+    with rasterio.MemoryFile(output) as memory, memory.open() as dataset:
+        assert dataset.transform == target_transform
+        assert (dataset.width, dataset.height) == (23, 17)
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [rasterio.Affine(1, 0, 0, 0, 0, 0),
+     rasterio.Affine(float("nan"), 0, 0, 0, -1, 0)],
+)
+def test_source_singular_or_nonfinite_affine_is_rejected(transform):
+    source = geotiff_bytes(rgb(8, 8), transform=transform)
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        reproject_raster(source, "EPSG:32643", from_origin(0, 80, 1, 1), (1, 1))
+    assert err.value.code == "invalid_transform"
+
+
+@pytest.mark.parametrize(
+    "kwargs,code",
+    [({"resampling": "lanczos"}, "invalid_resampling"),
+     ({"target_crs": "not-a-real-crs"}, "invalid_crs"),
+     ({"target_resolution": (0, 10)}, "invalid_resolution"),
+     ({"target_transform": rasterio.Affine(0, 0, 0, 0, 0, 0)}, "invalid_transform")],
+)
+def test_invalid_reproject_parameters_raise_spatial_input_error(kwargs, code):
+    source = geotiff_bytes(rgb())
+    args = {
+        "target_crs": "EPSG:32643",
+        "target_transform": from_origin(760000, 1430000, 10, 10),
+        "target_resolution": (10, 10),
     }
-class TestCheckCompatibility:
-    """Tests for check_compatibility()."""
+    args.update(kwargs)
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        reproject_raster(source, **args)
+    assert err.value.code == code
 
-    def test_compatible_identical_grids(self):
-        before_info = spatial_info()
-        after_info = spatial_info()
-        result = check_compatibility(before_info, after_info, True, True)
-        assert result["compatible"] is True
 
-    def test_incompatible_crs(self):
-        """Rasters with different CRS should raise SpatialInputError."""
-        before_info = spatial_info(crs="EPSG:32643")
-        after_info = spatial_info(crs="EPSG:32644")
-        with pytest.raises(geospatial.SpatialInputError):
-            check_compatibility(before_info, after_info, True, True)
+def test_reproject_rejects_missing_source_crs_and_transform():
+    payload = geotiff_bytes(rgb(), crs=None)
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        reproject_raster(payload, "EPSG:32643", from_origin(0, 0, 10, 10), (10, 10))
+    assert err.value.code == "missing_crs"
+    with rasterio.MemoryFile() as memory:
+        with memory.open(
+            driver="GTiff", height=16, width=16, count=1, dtype="uint8", crs="EPSG:32643"
+        ) as dataset:
+            dataset.write(np.zeros((1, 16, 16), dtype=np.uint8))
+        no_transform = memory.read()
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        reproject_raster(no_transform, "EPSG:32643", from_origin(0, 0, 10, 10), (10, 10))
+    assert err.value.code == "missing_transform"
 
-    def test_dimension_mismatch(self):
-        """Rasters with different dimensions should raise SpatialInputError."""
-        before_info = {"crs": "EPSG:32643", "transform": (10.0, 0.0, 760000.0, 0.0, -10.0, 1430000.0),
-                       "width": 128, "height": 128,
-                       "bounds": (760000.0, 1430000.0, 761280.0, 1431280.0)}
-        after_info = {"crs": "EPSG:32643", "transform": (10.0, 0.0, 760000.0, 0.0, -10.0, 1430000.0),
-                      "width": 64, "height": 64,
-                      "bounds": (760000.0, 1430000.0, 760640.0, 1430640.0)}
-        with pytest.raises(geospatial.SpatialInputError):
-            check_compatibility(before_info, after_info, True, True)
 
-    def test_ordinary_images_are_compatible(self):
-        """Ordinary (non-raster) inputs should return compatible=True."""
-        result = check_compatibility(None, None, False, False)
-        assert result["compatible"] is True
-
-    def test_mixed_raster_and_ordinary_rejected(self):
-        """A raster and an ordinary image should raise SpatialInputError."""
-        before_info = spatial_info()
-        with pytest.raises(geospatial.SpatialInputError):
-            check_compatibility(before_info, None, True, False)
-class TestReprojectRaster:
-    """Tests for reproject_raster()."""
-
-    @pytest.mark.skipif(
-        not geospatial.rasterio_available(),
-        reason="optional dependency 'rasterio' is not installed",
-    )
-    def test_reproject_to_same_crs_preserves_data(self):
-        """Reprojecting to the same CRS should preserve the data."""
-        array = make_rgb(seed=42)
-        info_dict = spatial_info()
-        raw = geotiff_bytes(array, crs=info_dict["crs"], transform=info_dict["transform"])
-        result = reproject_raster(
-            raw,
-            target_crs=info_dict["crs"],
-            target_transform=info_dict["transform"],
-            target_resolution=(10.0, 10.0),
+def test_invalid_resampling_rejected():
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        reproject_raster(
+            geotiff_bytes(rgb()), "EPSG:32643", from_origin(760000, 1430000, 10, 10),
+            (10, 10), resampling="invented",
         )
-        assert result is not None
-        assert len(result) > 0
+    assert err.value.code == "invalid_resampling"
 
-    def test_reproject_with_bilinear_resampling(self):
-        """Test that bilinear resampling is the default."""
-        array = make_rgb(seed=42)
-        info_dict = spatial_info()
-        raw = geotiff_bytes(array, crs=info_dict["crs"], transform=info_dict["transform"])
-        result = reproject_raster(
-            raw,
-            target_crs=info_dict["crs"],
-            target_transform=info_dict["transform"],
-            target_resolution=(10.0, 10.0),
-            resampling="bilinear",
-        )
-        assert result is not None
 
-    @pytest.mark.skipif(
-        not geospatial.rasterio_available(),
-        reason="optional dependency 'rasterio' is not installed",
-    )
-    def test_reproject_changes_resolution(self):
-        """Reprojecting to a different resolution changes the array shape."""
-        array = make_rgb(seed=42)
-        info_dict = spatial_info()
-        raw = geotiff_bytes(array, crs=info_dict["crs"], transform=info_dict["transform"])
-        result = reproject_raster(
-            raw,
-            target_crs=info_dict["crs"],
-            target_transform=info_dict["transform"],
-            target_resolution=(20.0, 20.0),
-            resampling="bilinear",
-        )
-        assert result is not None
-        with io.BytesIO(result) as buf:
-            with rasterio.open(buf) as dst:
-                assert dst.height < info_dict["height"]
-                assert dst.width < info_dict["width"]
-class TestPreprocessRasterPair:
-    """Tests for preprocess_raster_pair()."""
+def test_mixed_raster_and_image_rejected_and_images_passthrough():
+    from PIL import Image
 
-    @pytest.mark.skipif(
-        not geospatial.rasterio_available(),
-        reason="optional dependency 'rasterio' is not installed",
-    )
-    def test_preprocess_identical_grids(self):
-        """Preprocessing a pair with identical grids should succeed."""
-        before_info = spatial_info()
-        after_info = spatial_info()
-        before_bytes = geotiff_bytes(make_rgb(), crs=before_info["crs"], transform=before_info["transform"])
-        after_bytes = geotiff_bytes(make_rgb(), crs=after_info["crs"], transform=after_info["transform"])
-        result = preprocess_raster_pair(before_bytes, after_bytes)
-        assert "before" in result
-        assert "after" in result
-        assert "reference_info" in result
-        assert result["note"] is not None
+    image_io = io.BytesIO()
+    Image.fromarray(rgb()).save(image_io, format="PNG")
+    image = image_io.getvalue()
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        preprocess_raster_pair(geotiff_bytes(rgb()), image)
+    assert err.value.code == "unsupported_input_pair"
+    result = preprocess_raster_pair(image, image)
+    assert result["before"] == image and result["after"] == image
+    assert result["reference_info"] is None
 
-    @pytest.mark.skipif(
-        not geospatial.rasterio_available(),
-        reason="optional dependency 'rasterio' is not installed",
-    )
-    def test_preprocess_uses_before_as_reference(self):
-        """The reference_info should come from the before raster."""
-        before_info = spatial_info(crs="EPSG:32643")
-        after_info = spatial_info(crs="EPSG:32644")
-        before_bytes = geotiff_bytes(make_rgb(), crs=before_info["crs"], transform=before_info["transform"])
-        after_bytes = geotiff_bytes(make_rgb(), crs=after_info["crs"], transform=after_info["transform"])
-        with pytest.raises(geospatial.SpatialInputError):
-            preprocess_raster_pair(before_bytes, after_bytes)
 
-    def test_reproject_with_nearest_resampling_categorical(self):
-        """Test nearest resampling for categorical data."""
-        array = make_rgb(seed=42)
-        info_dict = spatial_info()
-        raw = geotiff_bytes(array, crs=info_dict["crs"], transform=info_dict["transform"])
-        result = reproject_raster(
-            raw,
-            target_crs=info_dict["crs"],
-            target_transform=info_dict["transform"],
-            target_resolution=(10.0, 10.0),
-            resampling="nearest",
-        )
-        assert result is not None
+def test_preprocess_requires_geospatial_metadata():
+    unreferenced = geotiff_bytes(rgb(), crs=None)
+    with pytest.raises(geospatial.SpatialInputError) as err:
+        preprocess_raster_pair(unreferenced, unreferenced)
+    assert err.value.code == "missing_crs"
+
+
+def test_strict_compatibility_checks_affine_grid_alignment():
+    before = {
+        "crs": "EPSG:32643", "transform": from_origin(0, 100, 10, 10),
+        "width": 10, "height": 10, "bounds": (0, 0, 100, 100),
+    }
+    after = {
+        "crs": "EPSG:32643", "transform": from_origin(1, 101, 10, 10),
+        "width": 10, "height": 10, "bounds": (1, 1, 101, 101),
+    }
+    with pytest.raises(geospatial.SpatialInputError):
+        check_compatibility(before, after, True, True)

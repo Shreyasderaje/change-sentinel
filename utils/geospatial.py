@@ -16,6 +16,7 @@ substitutes default geographic bounds for real metadata.
 from __future__ import annotations
 
 import os
+import math
 import tempfile
 
 import numpy as np
@@ -34,6 +35,189 @@ except Exception as exc:  # ImportError, or a broken GDAL/PROJ install
 def rasterio_available() -> bool:
     """Whether the optional rasterio dependency could be imported."""
     return HAS_RASTERIO
+
+
+class SpatialInputError(ValueError):
+    """Raised when a pair cannot safely be treated as spatially comparable."""
+
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
+def _validated_spatial_metadata(info, label):
+    if not isinstance(info, dict):
+        raise SpatialInputError(
+            "missing_georeference",
+            f"{label} raster must have a readable CRS and affine transform.",
+        )
+
+    crs = info.get("crs_obj")
+    if crs is None:
+        crs = info.get("crs")
+    if crs is None or (isinstance(crs, str) and not crs.strip()):
+        raise SpatialInputError(
+            "missing_crs", f"{label} raster is missing a coordinate reference system."
+        )
+
+    transform = info.get("transform")
+    try:
+        coefficients = tuple(float(value) for value in transform)
+    except (TypeError, ValueError):
+        coefficients = ()
+    if len(coefficients) < 6 or not all(
+        math.isfinite(value) for value in coefficients[:6]
+    ):
+        raise SpatialInputError(
+            "missing_transform",
+            f"{label} raster is missing a usable affine transform.",
+        )
+
+    try:
+        width = int(info["width"])
+        height = int(info["height"])
+        bounds = tuple(float(value) for value in info["bounds"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise SpatialInputError(
+            "invalid_metadata",
+            f"{label} raster has invalid dimensions or spatial bounds.",
+        )
+    if (
+        width <= 0
+        or height <= 0
+        or len(bounds) != 4
+        or not all(math.isfinite(value) for value in bounds)
+        or info["width"] != width
+        or info["height"] != height
+    ):
+        raise SpatialInputError(
+            "invalid_metadata",
+            f"{label} raster has invalid dimensions or spatial bounds.",
+        )
+
+    a, b, c, d, e, f = coefficients[:6]
+    corner_coordinates = [
+        (c, f),
+        (a * width + c, d * width + f),
+        (b * height + c, e * height + f),
+        (a * width + b * height + c, d * width + e * height + f),
+    ]
+    expected_bounds = (
+        min(point[0] for point in corner_coordinates),
+        min(point[1] for point in corner_coordinates),
+        max(point[0] for point in corner_coordinates),
+        max(point[1] for point in corner_coordinates),
+    )
+    return crs, coefficients[:6], width, height, bounds, expected_bounds
+
+
+def validate_spatial_pair(
+    before_info,
+    after_info,
+    *,
+    before_is_raster,
+    after_is_raster,
+    tolerance=1e-6,
+):
+    """Validate whether two inputs share the same raster grid.
+
+    Ordinary image pairs are explicitly classified as pixel-space only;
+    their geographic relationship is not inferred. A spatial comparison
+    requires two georeferenced rasters with matching CRS, dimensions,
+    resolution, extent, and affine grid alignment. This function validates
+    metadata only; it does not reproject, resample, or align either raster.
+
+    ``before_info`` and ``after_info`` are values returned by
+    :func:`read_georeference`. Set the ``*_is_raster`` flags from the actual
+    input formats so an unreferenced raster is not mistaken for an ordinary
+    image with no geographic metadata.
+    """
+    if not isinstance(before_is_raster, bool) or not isinstance(after_is_raster, bool):
+        raise TypeError("before_is_raster and after_is_raster must be booleans.")
+    if not math.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("tolerance must be a finite, non-negative number.")
+
+    if before_is_raster != after_is_raster:
+        raise SpatialInputError(
+            "unsupported_input_pair",
+            "A raster and an ordinary image cannot be assumed to share "
+            "geographic coordinates.",
+        )
+    if not before_is_raster:
+        return {
+            "mode": "pixel",
+            "georeferenced": False,
+            "note": (
+                "Both inputs are ordinary images. They are compared in pixel "
+                "space only; no shared geographic coordinates are assumed."
+            ),
+        }
+
+    before = _validated_spatial_metadata(before_info, "Before")
+    after = _validated_spatial_metadata(after_info, "After")
+    before_crs, before_transform, before_width, before_height, before_bounds, before_expected_bounds = before
+    after_crs, after_transform, after_width, after_height, after_bounds, after_expected_bounds = after
+
+    for label, bounds, expected_bounds in (
+        ("Before", before_bounds, before_expected_bounds),
+        ("After", after_bounds, after_expected_bounds),
+    ):
+        if any(
+            not math.isclose(actual, expected, rel_tol=0.0, abs_tol=tolerance)
+            for actual, expected in zip(bounds, expected_bounds)
+        ):
+            raise SpatialInputError(
+                "invalid_metadata",
+                f"{label} raster bounds do not match its affine transform and dimensions.",
+            )
+
+    mismatches = []
+    if before_crs != after_crs:
+        mismatches.append("CRS differs")
+    if (before_width, before_height) != (after_width, after_height):
+        mismatches.append("raster dimensions differ")
+
+    before_x_resolution = math.hypot(before_transform[0], before_transform[3])
+    before_y_resolution = math.hypot(before_transform[1], before_transform[4])
+    after_x_resolution = math.hypot(after_transform[0], after_transform[3])
+    after_y_resolution = math.hypot(after_transform[1], after_transform[4])
+    if not (
+        math.isclose(
+            before_x_resolution, after_x_resolution, rel_tol=0.0, abs_tol=tolerance
+        )
+        and math.isclose(
+            before_y_resolution, after_y_resolution, rel_tol=0.0, abs_tol=tolerance
+        )
+    ):
+        mismatches.append("pixel resolution differs")
+
+    if any(
+        not math.isclose(a, b, rel_tol=0.0, abs_tol=tolerance)
+        for a, b in zip(before_bounds, after_bounds)
+    ):
+        mismatches.append("spatial extent differs")
+    if any(
+        not math.isclose(a, b, rel_tol=0.0, abs_tol=tolerance)
+        for a, b in zip(before_transform, after_transform)
+    ):
+        mismatches.append("affine grid alignment differs")
+
+    if mismatches:
+        raise SpatialInputError(
+            "spatial_mismatch",
+            "Before and after rasters are not on the same spatial grid: "
+            + "; ".join(mismatches)
+            + ". Reproject/resample them to a common grid before comparison.",
+        )
+
+    return {
+        "mode": "geospatial",
+        "georeferenced": True,
+        "note": (
+            "Both inputs have matching CRS, dimensions, resolution, spatial "
+            "extent, and affine grid alignment."
+        ),
+    }
 
 
 def _with_temp_tiff(file_bytes: bytes):

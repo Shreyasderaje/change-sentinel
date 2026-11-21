@@ -20,11 +20,6 @@ from utils import change_detection as cd
 from utils import geospatial
 from utils import map_generation as mapgen
 
-pytestmark = pytest.mark.skipif(
-    not geospatial.rasterio_available(),
-    reason="optional dependency 'rasterio' is not installed",
-)
-
 # Location of the synthetic raster: roughly central Bangalore in UTM 43N.
 UTM43_ORIGIN_EASTING = 760000.0
 UTM43_ORIGIN_NORTHING = 1430000.0
@@ -65,6 +60,174 @@ def geotiff_bytes(array, crs="EPSG:32643", transform=None):
     return buffer.getvalue()
 
 
+def spatial_info(
+    *,
+    crs="EPSG:32643",
+    width=128,
+    height=128,
+    transform=(10.0, 0.0, 760000.0, 0.0, -10.0, 1430000.0),
+):
+    """Build georeference metadata without requiring the optional rasterio package."""
+    a, b, c, d, e, f = transform
+    corners = [
+        (c, f),
+        (a * width + c, d * width + f),
+        (b * height + c, e * height + f),
+        (a * width + b * height + c, d * width + e * height + f),
+    ]
+    return {
+        "crs": crs,
+        "crs_obj": crs,
+        "transform": transform,
+        "width": width,
+        "height": height,
+        "bounds": (
+            min(point[0] for point in corners),
+            min(point[1] for point in corners),
+            max(point[0] for point in corners),
+            max(point[1] for point in corners),
+        ),
+    }
+
+
+def test_spatial_contract_accepts_identical_georeferenced_grids():
+    result = geospatial.validate_spatial_pair(
+        spatial_info(),
+        spatial_info(),
+        before_is_raster=True,
+        after_is_raster=True,
+    )
+
+    assert result["mode"] == "geospatial"
+    assert result["georeferenced"] is True
+
+
+def test_spatial_contract_keeps_ordinary_images_in_explicit_pixel_mode():
+    result = geospatial.validate_spatial_pair(
+        None,
+        None,
+        before_is_raster=False,
+        after_is_raster=False,
+    )
+
+    assert result["mode"] == "pixel"
+    assert result["georeferenced"] is False
+    assert "no shared geographic coordinates are assumed" in result["note"]
+
+
+def test_spatial_contract_rejects_mixed_raster_and_ordinary_image():
+    with pytest.raises(geospatial.SpatialInputError) as exc_info:
+        geospatial.validate_spatial_pair(
+            spatial_info(),
+            None,
+            before_is_raster=True,
+            after_is_raster=False,
+        )
+
+    assert exc_info.value.code == "unsupported_input_pair"
+    assert "cannot be assumed to share geographic coordinates" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("info", "code", "message"),
+    [
+        (None, "missing_georeference", "CRS and affine transform"),
+        (
+            {key: value for key, value in spatial_info().items() if key != "crs_obj" and key != "crs"},
+            "missing_crs",
+            "coordinate reference system",
+        ),
+        (
+            {key: value for key, value in spatial_info().items() if key != "transform"},
+            "missing_transform",
+            "affine transform",
+        ),
+    ],
+)
+def test_spatial_contract_rejects_rasters_without_required_metadata(
+    info, code, message
+):
+    with pytest.raises(geospatial.SpatialInputError) as exc_info:
+        geospatial.validate_spatial_pair(
+            info,
+            spatial_info(),
+            before_is_raster=True,
+            after_is_raster=True,
+        )
+
+    assert exc_info.value.code == code
+    assert message in str(exc_info.value)
+
+
+def test_spatial_contract_reports_crs_mismatch():
+    with pytest.raises(geospatial.SpatialInputError) as exc_info:
+        geospatial.validate_spatial_pair(
+            spatial_info(crs="EPSG:32643"),
+            spatial_info(crs="EPSG:32644"),
+            before_is_raster=True,
+            after_is_raster=True,
+        )
+
+    assert exc_info.value.code == "spatial_mismatch"
+    assert "CRS differs" in str(exc_info.value)
+
+
+def test_spatial_contract_reports_dimension_and_extent_mismatches():
+    with pytest.raises(geospatial.SpatialInputError) as exc_info:
+        geospatial.validate_spatial_pair(
+            spatial_info(width=128),
+            spatial_info(width=64),
+            before_is_raster=True,
+            after_is_raster=True,
+        )
+
+    assert exc_info.value.code == "spatial_mismatch"
+    assert "raster dimensions differ" in str(exc_info.value)
+    assert "spatial extent differs" in str(exc_info.value)
+
+
+def test_spatial_contract_reports_resolution_and_alignment_mismatches():
+    before = spatial_info()
+    after = spatial_info(
+        transform=(20.0, 0.0, 760000.0, 0.0, -20.0, 1430000.0)
+    )
+
+    with pytest.raises(geospatial.SpatialInputError) as exc_info:
+        geospatial.validate_spatial_pair(
+            before,
+            after,
+            before_is_raster=True,
+            after_is_raster=True,
+        )
+
+    assert exc_info.value.code == "spatial_mismatch"
+    assert "pixel resolution differs" in str(exc_info.value)
+    assert "spatial extent differs" in str(exc_info.value)
+    assert "affine grid alignment differs" in str(exc_info.value)
+
+
+def test_spatial_contract_rejects_origin_shift_with_same_resolution():
+    before = spatial_info()
+    after = spatial_info(
+        transform=(10.0, 0.0, 760010.0, 0.0, -10.0, 1430000.0)
+    )
+
+    with pytest.raises(geospatial.SpatialInputError) as exc_info:
+        geospatial.validate_spatial_pair(
+            before,
+            after,
+            before_is_raster=True,
+            after_is_raster=True,
+        )
+
+    assert "spatial extent differs" in str(exc_info.value)
+    assert "affine grid alignment differs" in str(exc_info.value)
+
+
+@pytest.mark.skipif(
+    not geospatial.rasterio_available(),
+    reason="optional dependency 'rasterio' is not installed",
+)
 def test_georeference_is_read_from_metadata():
     array = make_rgb(seed=20)
     info, note = geospatial.read_georeference(geotiff_bytes(array))
@@ -80,6 +243,10 @@ def test_georeference_is_read_from_metadata():
     assert "Georeferenced raster detected" in note
 
 
+@pytest.mark.skipif(
+    not geospatial.rasterio_available(),
+    reason="optional dependency 'rasterio' is not installed",
+)
 def test_pixel_to_lonlat_is_accurate():
     array = make_rgb(seed=21)
     info, _ = geospatial.read_georeference(geotiff_bytes(array))
@@ -98,6 +265,10 @@ def test_pixel_to_lonlat_is_accurate():
     assert lat_south < lat0
 
 
+@pytest.mark.skipif(
+    not geospatial.rasterio_available(),
+    reason="optional dependency 'rasterio' is not installed",
+)
 def test_regions_annotated_with_geographic_coordinates():
     before = make_rgb(seed=22)
     after = before.copy()
@@ -115,6 +286,10 @@ def test_regions_annotated_with_geographic_coordinates():
         assert region["bbox_lonlat"] is not None
 
 
+@pytest.mark.skipif(
+    not geospatial.rasterio_available(),
+    reason="optional dependency 'rasterio' is not installed",
+)
 def test_folium_map_builds_for_annotated_regions():
     before = make_rgb(seed=23)
     after = before.copy()
@@ -131,6 +306,10 @@ def test_folium_map_builds_for_annotated_regions():
         assert mapgen.build_change_map(annotated, info) is None
 
 
+@pytest.mark.skipif(
+    not geospatial.rasterio_available(),
+    reason="optional dependency 'rasterio' is not installed",
+)
 def test_untagged_raster_yields_no_coordinates():
     """A TIFF without a CRS must NOT produce geographic coordinates."""
     array = make_rgb(seed=24)

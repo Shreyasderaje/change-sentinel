@@ -28,3 +28,84 @@ def get_project(project_id: str, db: Session = Depends(get_db), user: User = Dep
     authorized = user.role == 'admin' or project.owner_id == user.id or db.scalar(select(ProjectAccess.id).where(ProjectAccess.project_id == project_id, ProjectAccess.user_id == user.id)) is not None
     if not authorized: raise HTTPException(404, 'Project not found')
     return project
+
+
+from app.schemas.project import ProjectUpdate
+from app.models.entities import Imagery, Analysis, Investigation
+from sqlalchemy.exc import IntegrityError
+from fastapi import Response
+
+
+def _require_project_write(project_id, db, user):
+    if user.role not in ("analyst", "admin"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    project = db.get(Project, project_id)
+
+    if project is None:
+        raise HTTPException(404, "Project not found")
+
+    if user.role != "admin" and project.owner_id != user.id:
+        raise HTTPException(404, "Project not found")
+
+    return project
+
+
+@router.put("/{project_id}", response_model=ProjectOut)
+def update_project(
+    project_id: str,
+    payload: ProjectUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    project = _require_project_write(project_id, db, user)
+
+    if not payload.name.strip():
+        raise HTTPException(422, "Project name cannot be blank")
+
+    project.name = payload.name.strip()
+    project.description = payload.description
+
+    db.commit()
+    db.refresh(project)
+
+    return project
+
+
+@router.delete("/{project_id}", status_code=204)
+def delete_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    project = _require_project_write(project_id, db, user)
+
+    for model in (
+        ProjectAccess,
+        Imagery,
+        Analysis,
+        Investigation,
+    ):
+        dependent = db.scalar(
+            select(model.id)
+            .where(model.project_id == project_id)
+            .limit(1)
+        )
+
+        if dependent is not None:
+            raise HTTPException(
+                409,
+                "Cannot delete project with dependent records",
+            )
+
+    try:
+        db.delete(project)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "Project deletion conflicts with existing records",
+        )
+
+    return Response(status_code=204)

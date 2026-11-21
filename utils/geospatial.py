@@ -15,6 +15,7 @@ substitutes default geographic bounds for real metadata.
 
 from __future__ import annotations
 
+from io import BytesIO
 import os
 import math
 import tempfile
@@ -30,6 +31,8 @@ try:
 except Exception as exc:  # ImportError, or a broken GDAL/PROJ install
     HAS_RASTERIO = False
     RASTERIO_IMPORT_ERROR = str(exc)
+
+from rasterio.enums import Resampling
 
 
 def rasterio_available() -> bool:
@@ -387,3 +390,264 @@ def annotate_regions(regions, info):
 
         annotated.append(item)
     return annotated
+def check_compatibility(
+    before_info: dict,
+    after_info: dict,
+    before_is_raster: bool,
+    after_is_raster: bool,
+) -> dict:
+    """Check whether two rasters are spatially compatible for change detection.
+
+    Validates that the pair is not mixed (raster + ordinary image), and that
+    both rasters share the same CRS, transform, resolution, and extent.
+
+    Parameters
+    ----------
+    before_info : dict
+        Metadata dict from :func:`read_georeference` for the before raster.
+    after_info : dict
+        Metadata dict from :func:`read_georeference` for the after raster.
+    before_is_raster : bool
+        True if the ``before`` input is a georeferenced raster.
+    after_is_raster : bool
+        True if the ``after`` input is a georeferenced raster.
+
+    Returns
+    -------
+    dict
+        ``{"compatible": True}`` when all checks pass.
+
+    Raises
+    ------
+    SpatialInputError
+        If the inputs are mixed, or if CRS, resolution, or extent differ.
+    """
+    if not isinstance(before_is_raster, bool) or not isinstance(after_is_raster, bool):
+        raise TypeError("before_is_raster and after_is_raster must be booleans.")
+
+    if before_is_raster != after_is_raster:
+        raise SpatialInputError(
+            "unsupported_input_pair",
+            "A raster and an ordinary image cannot be assumed to share "
+            "geographic coordinates.",
+        )
+
+    if not before_is_raster:
+        # Both are ordinary images -- pixel‑space comparison is fine.
+        return {"compatible": True}
+
+    # Both are rasters: validate CRS, resolution, and extent compatibility.
+    before_crs = before_info.get("crs_obj") or before_info.get("crs")
+    after_crs = after_info.get("crs_obj") or after_info.get("crs")
+
+    if before_crs != after_crs:
+        raise SpatialInputError(
+            "crs_mismatch",
+            f"CRS mismatch: before is {before_crs}, after is {after_crs}",
+        )
+
+    before_transform = before_info["transform"]
+    after_transform = after_info["transform"]
+
+    before_width = before_info["width"]
+    before_height = before_info["height"]
+    after_width = after_info["width"]
+    after_height = after_info["height"]
+
+    if (before_width, before_height) != (after_width, after_height):
+        raise SpatialInputError(
+            "dimension_mismatch",
+            f"Dimension mismatch: before {before_width}x{before_height} vs after {after_width}x{after_height}",
+        )
+
+    before_x_res = math.hypot(before_transform[0], before_transform[3])
+    before_y_res = math.hypot(before_transform[1], before_transform[4])
+    after_x_res = math.hypot(after_transform[0], after_transform[3])
+    after_y_res = math.hypot(after_transform[1], after_transform[4])
+
+    tolerance = 1e-6
+
+    if not (math.isclose(before_x_res, after_x_res, rel_tol=0.0, abs_tol=tolerance)
+            and math.isclose(before_y_res, after_y_res, rel_tol=0.0, abs_tol=tolerance)):
+        raise SpatialInputError(
+            "resolution_mismatch",
+            "Pixel resolution differs between before and after rasters.",
+        )
+
+    before_bounds = before_info["bounds"]
+    after_bounds = after_info["bounds"]
+
+    if any(not math.isclose(a, b, rel_tol=0.0, abs_tol=tolerance)
+           for a, b in zip(before_bounds, after_bounds)):
+        raise SpatialInputError(
+            "extent_mismatch",
+            "Spatial extent differs between before and after rasters.",
+        )
+
+    return {"compatible": True}
+def reproject_raster(
+    file_bytes: bytes,
+    target_crs,
+    target_transform,
+    target_resolution: tuple[float, float],
+    *,
+    resampling: str = "bilinear",
+) -> bytes:
+    """Reproject a GeoTIFF to a new CRS, transform, and resolution.
+
+    Parameters
+    ----------
+    file_bytes : bytes
+        Input GeoTIFF file bytes.
+    target_crs : rasterio.crs.CRS or str
+        Target coordinate reference system.
+    target_transform : tuple[float, ...]
+        Target affine transform (6 coefficients).
+    target_resolution : tuple[float, float]
+        Target (x, y) pixel resolution.
+    resampling : {"nearest", "bilinear"}, optional
+        Resampling method. Use ``"nearest"`` for categorical data and
+        ``"bilinear"`` for continuous data. Defaults to ``"bilinear"``.
+
+    Returns
+    -------
+    bytes
+        Reprojected GeoTIFF file bytes.
+    """
+    if not HAS_RASTERIO:
+        raise RuntimeError("rasterio is not available")
+
+    import rasterio
+    from rasterio.io import MemoryFile
+
+    target_crs_obj = (
+        target_crs
+        if isinstance(target_crs, rasterio.crs.CRS)
+        else rasterio.crs.CRS.from_user_input(target_crs)
+    )
+
+    with BytesIO(file_bytes) as input_buf:
+        with rasterio.open(input_buf) as src:
+            # Determine target width/height from the transform/resolution
+            # and the source coverage area.
+            src_bounds = src.bounds
+            min_x = src_bounds.left
+            min_y = src_bounds.bottom
+            max_x = src_bounds.right
+            max_y = src_bounds.top
+
+            target_width = int(round((max_x - min_x) / target_resolution[0]))
+            target_height = int(round((max_y - min_y) / target_resolution[1]))
+
+            target_transform_obj = rasterio.transform.from_origin(
+                min_x, max_y, target_resolution[0], target_resolution[1]
+            )
+
+            # Reproject using the target transform directly
+            num_bands = src.count
+            dtype = src.dtypes[0]
+            output_array = np.empty(
+                (target_height, target_width, num_bands), dtype=dtype
+            )
+
+            reproject(
+                source=src.read(),
+                destination=output_array,
+                src_crs=src.crs,
+                dst_crs=target_crs_obj,
+                transform=src.transform,
+                target_transform=target_transform_obj,
+                resampling=getattr(Resampling, resampling.upper(), Resampling.nearest),
+            )
+
+            # Build output dataset
+            profile = src.profile.copy()
+            profile.update(
+                driver="GTiff",
+                height=target_height,
+                width=target_width,
+                count=num_bands,
+                crs=target_crs_obj,
+                transform=target_transform_obj,
+                dtype=dtype,
+            )
+            with rasterio.open(output_bytes, "w", **profile) as dst:
+                dst.write(output_array.transpose(2, 0, 1))
+            reprojected_bytes = output_bytes.getvalue()
+
+    return reprojected_bytes
+def preprocess_raster_pair(
+    before_bytes: bytes,
+    after_bytes: bytes,
+) -> dict:
+    """Preprocess a raster pair for geospatial change detection.
+
+    Uses the ``before`` raster as the default reference grid. The ``after``
+    raster is reprojected/resampled to match the before raster's CRS, transform,
+    resolution, and extent. Nodata and geospatial metadata are preserved.
+
+    Parameters
+    ----------
+    before_bytes : bytes
+        GeoTIFF bytes for the earlier (before) image.
+    after_bytes : bytes
+        GeoTIFF bytes for the later (after) image.
+
+    Returns
+    -------
+    dict
+        ``{
+            "before": <bytes of before raster (unchanged)>,
+            "after": <bytes of after raster reprojected to before's grid>,
+            "reference_info": <metadata dict from read_georeference of before>,
+            "note": <descriptive string>
+        }``
+
+    Raises
+    ------
+    SpatialInputError
+        If the pair is mixed (one raster, one ordinary image) or if the rasters
+        cannot be made compatible.
+    RuntimeError
+        If rasterio is not available.
+    """
+    if not HAS_RASTERIO:
+        raise RuntimeError("rasterio is not available")
+
+    import rasterio
+
+    # Read georeference info for both rasters
+    before_info, before_note = read_georeference(before_bytes)
+    after_info, after_note = read_georeference(after_bytes)
+
+    # Check compatibility (rejects mixed pairs, validates CRS/resolution/extent)
+    check_compatibility(before_info, after_info, True, True)
+
+    # Use the before raster as the reference grid
+    reference_info = before_info
+    reference_crs = before_info["crs_obj"]
+    reference_transform = before_info["transform"]
+    reference_resolution = (
+        math.hypot(before_info["transform"][0], before_info["transform"][3]),
+        math.hypot(before_info["transform"][1], before_info["transform"][4]),
+    )
+
+    # Reproject the after raster to match the before raster's grid
+    after_reprojected = reproject_raster(
+        after_bytes,
+        target_crs=reference_crs,
+        target_transform=reference_transform,
+        target_resolution=reference_resolution,
+        resampling="bilinear",
+    )
+
+    # Read back the reprojected after as bytes
+    with BytesIO(after_reprojected) as buf:
+        after_processed = buf.read()
+
+    return {
+        "before": before_bytes,
+        "after": after_processed,
+        "reference_info": reference_info,
+        "note": "Pair preprocessed: after raster resampled to before raster's grid.",
+    }

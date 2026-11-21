@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Database is not exposed to the host or public internet.
+  api:
+    build: .
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://sentinel:${POSTGRES_PASSWORD}@db:5432/sentinel
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS}
+    ports:
+      - '127.0.0.1:8000:8000'
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  db_data:

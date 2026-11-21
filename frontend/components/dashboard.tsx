@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Header } from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import Footer from "@/components/layout/Footer";
@@ -8,17 +8,44 @@ import { Overview } from "@/components/views/Overview";
 import { Workspace } from "@/components/views/Workspace";
 import { Results } from "@/components/views/Results";
 import { Report } from "@/components/views/Report";
-import { type Analysis, type View } from "@/lib/types";
+import { FieldReview } from "@/components/field-review/FieldReview";
+import { type Analysis, type View, type UserRole } from "@/lib/types";
 import { postAnalyze } from "@/lib/api-client";
+import { logout, getAuthStatus } from "@/lib/auth-client";
 
 export default function Dashboard() {
   const [activeView, setActiveView] = useState<View>("overview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [before, setBefore] = useState<File | null>(null);
   const [after, setAfter] = useState<File | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [analysisVersion, setAnalysisVersion] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    // Initialize auth state from backend API (not sessionStorage).
+    // The actual session is held in an HttpOnly cookie by the server.
+    if (typeof window !== "undefined") {
+      getAuthStatus().then((status) => {
+        setIsAuthenticated(status.isAuthenticated);
+        setUserRole(status.role);
+      });
+    }
+  }, []);
+
+  async function registerAuthStatus() {
+    // Explicitly check auth status on mount
+    if (typeof window !== "undefined") {
+      await getAuthStatus();
+    }
+  }
+
+  useEffect(() => {
+    registerAuthStatus();
+  }, []);
 
   async function runAnalysis(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,13 +73,33 @@ export default function Dashboard() {
     setError("");
 
     try {
+      const [isAuthenticated, setIsAuthenticated] = useState(false);
+      const [isAuthLoading, setIsAuthLoading] = useState(true);
       const body = await postAnalyze(payload);
       setAnalysis(body as Analysis);
+      setAnalysisVersion((prev) => prev + 1);
       setActiveView("results");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not reach the analysis API.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleAuthToggle() {
+    if (isAuthenticated) {
+      try {
+        await logout();
+      } catch {
+        // Ignore logout errors; clear state regardless
+      }
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("cs_auth_ui");
+      }
+      setIsAuthenticated(false);
+      setActiveView("overview");
+    } else {
+      window.location.href = "/login";
     }
   }
 
@@ -78,6 +125,7 @@ export default function Dashboard() {
     ),
     results: <Results result={analysis} />,
     report: <Report result={analysis} />,
+    "field-review": <FieldReview key={analysisVersion} result={analysis} />,
   };
 
   return (
@@ -104,6 +152,8 @@ export default function Dashboard() {
           mobileMenuOpen={mobileMenuOpen}
           setMobileMenuOpen={setMobileMenuOpen}
           onAnalyzeImages={() => setActiveView("workspace")}
+          isAuthenticated={isAuthenticated}
+          onAuthToggle={handleAuthToggle}
         />
         <div className="mx-auto max-w-[1420px]">{viewContent[activeView]}</div>
         <Footer />

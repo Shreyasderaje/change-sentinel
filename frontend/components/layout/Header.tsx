@@ -6,10 +6,14 @@ export function Header({
   mobileMenuOpen,
   setMobileMenuOpen,
   onAnalyzeImages,
+  isAuthenticated = false,
+  onAuthToggle,
 }: {
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (open: boolean) => void;
   onAnalyzeImages: () => void;
+  isAuthenticated?: boolean;
+  onAuthToggle?: () => void;
 }) {
   return (
     <header className="mb-7 flex items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
@@ -34,6 +38,21 @@ export function Header({
         <button onClick={onAnalyzeImages} className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-cyan-200/20 bg-cyan-300/[0.06] px-3 text-[11px] font-medium text-cyan-50 transition hover:bg-cyan-300/[0.12]">
           Analyze images <Icon name="arrow" size={14} />
         </button>
+        {isAuthenticated ? (
+          <button
+            onClick={onAuthToggle}
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-red-300/20 bg-red-400/[0.06] px-3 text-[11px] font-medium text-red-100 transition hover:bg-red-400/[0.10]"
+          >
+            Logout <Icon name="arrow" size={14} />
+          </button>
+        ) : (
+          <button
+            onClick={onAuthToggle}
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-cyan-200/20 bg-cyan-300/[0.06] px-3 text-[11px] font-medium text-cyan-50 transition hover:bg-cyan-300/[0.12]"
+          >
+            Login <Icon name="arrow" size={14} />
+          </button>
+        )}
       </div>
     </header>
   );

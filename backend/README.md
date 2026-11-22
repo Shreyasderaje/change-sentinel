@@ -27,17 +27,30 @@ authentication API.
 
 ### `POST /api/v1/sarvam/transcribe`
 
-Send a multipart form field named `audio`. The route bounds its streaming read at
-25 MB and reuses `providers.sarvam` for audio format, integrity, and maximum
-30-second duration validation. Success returns `transcript` (editable by the
-client), `language_code`, `language_probability`, `request_id`, and `model` when
+This endpoint requires an active bearer-token account with the `officer` role.
+Authenticated analysts and admins receive HTTP 403; missing, invalid, expired,
+and inactive-user credentials receive HTTP 401. Send exactly one multipart file
+field named `audio`; additional fields and multiple files are rejected. The
+backend caps the audio file at 25 MiB and uses `providers.sarvam` to check file
+integrity, supported format, filename/MIME consistency, and a maximum duration
+of 30 seconds. Success returns `transcript` (editable by the client),
+`language_code`, `language_probability`, `request_id`, and `model` when
 available. It does not persist transcripts.
 
-The ASGI layer rejects bodies over 25 MB plus 64 KiB of multipart overhead before
-multipart parsing, supports streaming size checks when `Content-Length` is absent,
-and parses at most one file. Production ingress/reverse-proxy configuration must
-also set a request-body limit at or below this application limit and enforce body
-read timeouts; the application middleware is not a substitute for edge limits.
+The ASGI layer rejects actual request bodies over 25 MiB plus 64 KiB of
+multipart overhead before multipart parsing. It also rejects malformed
+`Content-Length` and counts received bytes when that header is absent or
+understated. Upload reads have a 10-second idle timeout and a 120-second maximum
+total duration by default; either timeout returns HTTP 408. Configure
+`SARVAM_UPLOAD_IDLE_TIMEOUT_SECONDS` (greater than 0 and at most 60 seconds) and
+`SARVAM_UPLOAD_MAX_DURATION_SECONDS` (greater than 0 and at most 600 seconds)
+to adjust these bounds.
+
+Production ingress/reverse-proxy configuration must independently cap request
+bodies at or below 25 MiB plus 64 KiB and enforce body-read/idle timeouts. No
+production ingress configuration is included here, so deployment protection must
+be verified in the actual hosting environment. Application middleware is not a
+substitute for edge limits.
 
 ### `POST /api/v1/sarvam/chat`
 
@@ -84,6 +97,8 @@ SARVAM_API_KEY=<server-only key>
 SARVAM_STT_MODEL=saaras:v4
 SARVAM_CHAT_MODEL=sarvam-105b
 SARVAM_TIMEOUT_SECONDS=30
+SARVAM_UPLOAD_IDLE_TIMEOUT_SECONDS=10
+SARVAM_UPLOAD_MAX_DURATION_SECONDS=120
 ```
 
 The key is optional at startup and required when calling Sarvam. Provider
@@ -101,15 +116,19 @@ docker compose up --build
 ```
 
 Compose builds from the repository root so the root-level `providers` package is
-available inside the image. PostgreSQL uses the installed `pg8000` driver. A
-one-shot migration service applies Alembic migrations; the API starts only after
-that service succeeds.
+available inside the image. PostgreSQL uses the installed `pg8000` driver. For the local Docker PostgreSQL
+service, `DB_SSL_ENABLED` defaults to `false` because that container does not offer
+SSL. Set `DB_SSL_ENABLED=true` explicitly when using remote or production
+PostgreSQL; the backend then requires verified TLS and can use `DB_SSL_CA_FILE`
+for a private CA certificate. SSL remains enabled by default in backend settings
+outside the local Compose override. A one-shot migration service applies Alembic
+migrations; the API starts only after that service succeeds.
 
 Paid Sarvam calls have a conservative in-process quota of 10 requests per user
 per minute and 60 per hour, with at most two concurrent Sarvam requests per
-process. These limits protect a single worker only. Production must configure a
-shared distributed limiter (for example Redis-backed quotas and semaphores) across
-all workers and replicas.
+process. These limits protect a single worker only and multiply across workers
+and replicas. Production must configure a shared distributed limiter (for example
+Redis-backed quotas and semaphores) across all workers and replicas.
 
 ## Security boundaries and limitations
 

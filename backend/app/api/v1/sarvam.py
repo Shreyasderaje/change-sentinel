@@ -68,6 +68,9 @@ async def transcribe(
     request: Request,
     user: User = Depends(current_user),
 ):
+    if user.role != "officer":
+        raise HTTPException(status_code=403, detail="Officer role required for transcription.")
+
     # Parse only after current_user has succeeded. ASGI middleware caps the
     # request before this point and Starlette is also limited to one file.
     try:

@@ -1,7 +1,8 @@
 
 from functools import lru_cache
+import math
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +15,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./dev.db"
 
-    # Supabase / PostgreSQL SSL certificate
+    # PostgreSQL SSL; enabled by default, with optional CA certificate.
+    db_ssl_enabled: bool = True
     db_ssl_ca_file: str | None = None
 
     # JWT Authentication
@@ -33,6 +35,22 @@ class Settings(BaseSettings):
     sarvam_stt_model: str = "saaras:v4"
     sarvam_chat_model: str = "sarvam-105b"
     sarvam_timeout_seconds: float = 30.0
+    sarvam_upload_idle_timeout_seconds: float = 10.0
+    sarvam_upload_max_duration_seconds: float = 120.0
+
+    @field_validator("sarvam_upload_idle_timeout_seconds")
+    @classmethod
+    def validate_upload_idle_timeout(cls, value: float) -> float:
+        if not math.isfinite(value) or not 0 < value <= 60:
+            raise ValueError("SARVAM_UPLOAD_IDLE_TIMEOUT_SECONDS must be greater than 0 and at most 60.")
+        return value
+
+    @field_validator("sarvam_upload_max_duration_seconds")
+    @classmethod
+    def validate_upload_max_duration(cls, value: float) -> float:
+        if not math.isfinite(value) or not 0 < value <= 600:
+            raise ValueError("SARVAM_UPLOAD_MAX_DURATION_SECONDS must be greater than 0 and at most 600.")
+        return value
 
     def validate_security(self):
         if self.environment != "development":

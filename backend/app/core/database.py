@@ -1,10 +1,9 @@
 
-import ssl
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.core.config import get_settings
+from app.core.database_config import build_connect_args
 
 
 class Base(DeclarativeBase):
@@ -15,22 +14,11 @@ class Base(DeclarativeBase):
 settings = get_settings()
 
 # Database connection configuration
-connect_args = {}
-
-if settings.database_url.startswith("sqlite"):
-    connect_args = {
-        "check_same_thread": False
-    }
-
-elif settings.database_url.startswith("postgresql+pg8000"):
-    # Enable verified SSL for Supabase PostgreSQL
-    ssl_context = ssl.create_default_context(
-        cafile=settings.db_ssl_ca_file
-    )
-
-    connect_args = {
-        "ssl_context": ssl_context
-    }
+connect_args = build_connect_args(
+    settings.database_url,
+    settings.db_ssl_enabled,
+    settings.db_ssl_ca_file,
+)
 
 
 # Create SQLAlchemy database engine

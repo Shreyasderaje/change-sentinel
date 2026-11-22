@@ -3,9 +3,12 @@ import io
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import wave
 
+import anyio
+import jwt
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -169,6 +172,62 @@ def test_successful_transcription_returns_editable_fields_without_persistence(mo
     transcribe.assert_called_once()
 
 
+@pytest.mark.parametrize("role,expected_status", [("officer", 200), ("analyst", 403), ("admin", 403)])
+def test_transcription_is_officer_only(role, expected_status, monkeypatch):
+    from app.api.v1 import sarvam as routes
+    from unittest.mock import Mock
+
+    _, _, _, token = create_investigation(role=role)
+    transcribe = Mock(return_value={
+        "transcript": "Editable transcript", "language_code": None,
+        "language_probability": None, "request_id": None, "model": "saaras:v4",
+    })
+    monkeypatch.setattr(routes.sarvam, "transcribe_audio", transcribe)
+    monkeypatch.setattr(routes, "request_limiter", SarvamRequestLimiter())
+    response = client.post(
+        "/api/v1/sarvam/transcribe", headers=auth(token),
+        files={"audio": ("note.wav", wav_bytes(), "audio/wav")},
+    )
+    assert response.status_code == expected_status
+    if role == "officer":
+        assert response.json()["transcript"] == "Editable transcript"
+        transcribe.assert_called_once()
+    else:
+        assert response.json()["detail"] == "Officer role required for transcription."
+        transcribe.assert_not_called()
+
+
+def test_expired_transcription_token_is_rejected():
+    from app.core.config import get_settings
+
+    user, _, _, _ = create_investigation()
+    expired_token = jwt.encode(
+        {"sub": user.id, "exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
+        get_settings().jwt_secret,
+        algorithm=get_settings().jwt_algorithm,
+    )
+    response = client.post(
+        "/api/v1/sarvam/transcribe", headers=auth(expired_token),
+        files={"audio": ("note.wav", wav_bytes(), "audio/wav")},
+    )
+    assert response.status_code == 401
+
+
+def test_inactive_user_transcription_token_is_rejected():
+    from sqlalchemy import select
+
+    user, _, _, token = create_investigation()
+    with TestSession() as db:
+        stored_user = db.scalar(select(User).where(User.id == user.id))
+        stored_user.active = False
+        db.commit()
+    response = client.post(
+        "/api/v1/sarvam/transcribe", headers=auth(token),
+        files={"audio": ("note.wav", wav_bytes(), "audio/wav")},
+    )
+    assert response.status_code == 401
+
+
 def test_transcription_rejects_actual_audio_extension_mismatch():
     _, _, _, token = create_investigation()
     response = client.post(
@@ -184,6 +243,16 @@ def test_multiple_uploaded_files_are_rejected():
     response = client.post(
         "/api/v1/sarvam/transcribe", headers=auth(token),
         files=[("audio", ("one.wav", wav_bytes(), "audio/wav")), ("audio", ("two.wav", wav_bytes(), "audio/wav"))],
+    )
+    assert response.status_code == 400
+
+
+def test_unexpected_multipart_field_is_rejected():
+    _, _, _, token = create_investigation()
+    response = client.post(
+        "/api/v1/sarvam/transcribe", headers=auth(token),
+        data={"unexpected": "text field"},
+        files={"audio": ("note.wav", wav_bytes(), "audio/wav")},
     )
     assert response.status_code == 400
 
@@ -440,8 +509,182 @@ def run_limited_asgi_request(path, headers, chunks):
         sent.append(message)
 
     middleware = SarvamRequestBodyLimitMiddleware(downstream)
-    asyncio.run(middleware({"type": "http", "method": "POST", "path": path, "headers": headers}, receive, send))
+    anyio.run(middleware, {"type": "http", "method": "POST", "path": path, "headers": headers}, receive, send)
     return sent[0]["status"], downstream_called
+
+
+def run_middleware_with_receive(middleware, receive):
+    sent = []
+    downstream_called = False
+
+    async def downstream(scope, replay_receive, send):
+        nonlocal downstream_called
+        downstream_called = True
+        while True:
+            message = await replay_receive()
+            if message["type"] == "http.disconnect" or not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok", "more_body": False})
+
+    async def send(message):
+        sent.append(message)
+
+    original_app = middleware.app
+    middleware.app = downstream
+    try:
+        anyio.run(
+            middleware,
+            {"type": "http", "method": "POST", "path": "/api/v1/sarvam/transcribe", "headers": []},
+            receive,
+            send,
+        )
+    finally:
+        middleware.app = original_app
+    return (sent[0]["status"] if sent else None), downstream_called
+
+
+def test_slow_unauthenticated_upload_times_out_and_releases_slot(monkeypatch):
+    import app.core.request_limits as limits
+
+    real_spool = limits.tempfile.SpooledTemporaryFile
+    created_spools = []
+
+    def tracked_spool(*args, **kwargs):
+        spool = real_spool(*args, **kwargs)
+        created_spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(limits.tempfile, "SpooledTemporaryFile", tracked_spool)
+    middleware = SarvamRequestBodyLimitMiddleware(
+        lambda *_args: None,
+        idle_timeout_seconds=0.01,
+        max_duration_seconds=0.2,
+        max_buffered_requests=1,
+    )
+    slots = middleware._request_slots
+
+    async def stalled_receive():
+        await asyncio.sleep(0.05)
+        return {"type": "http.request", "body": b"x", "more_body": True}
+
+    status, downstream_called = run_middleware_with_receive(middleware, stalled_receive)
+    assert status == 408
+    assert downstream_called is False
+    assert created_spools and created_spools[0].closed
+    assert slots.acquire(blocking=False)
+    slots.release()
+
+    # The same one-slot middleware can accept a subsequent complete upload.
+    status, downstream_called = run_middleware_with_receive(
+        middleware,
+        _immediate_final_message,
+    )
+    assert status == 200
+    assert downstream_called is True
+
+
+async def _immediate_final_message():
+    return {"type": "http.request", "body": b"valid", "more_body": False}
+
+
+def test_maximum_body_read_duration_is_enforced():
+    middleware = SarvamRequestBodyLimitMiddleware(
+        lambda *_args: None,
+        idle_timeout_seconds=0.2,
+        max_duration_seconds=0.04,
+        max_buffered_requests=1,
+    )
+
+    async def slow_progress_receive():
+        await asyncio.sleep(0.015)
+        return {"type": "http.request", "body": b"x", "more_body": True}
+
+    status, downstream_called = run_middleware_with_receive(middleware, slow_progress_receive)
+    assert status == 408
+    assert downstream_called is False
+
+
+def test_cancelled_upload_cleans_spool_and_releases_slot(monkeypatch):
+    import app.core.request_limits as limits
+
+    real_spool = limits.tempfile.SpooledTemporaryFile
+    created_spools = []
+
+    def tracked_spool(*args, **kwargs):
+        spool = real_spool(*args, **kwargs)
+        created_spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(limits.tempfile, "SpooledTemporaryFile", tracked_spool)
+    slots = threading.BoundedSemaphore(1)
+    middleware = SarvamRequestBodyLimitMiddleware(
+        lambda *_args: None,
+        idle_timeout_seconds=10,
+        max_duration_seconds=30,
+        max_buffered_requests=1,
+    )
+    middleware._request_slots = slots
+
+    async def run_cancelled():
+        async def stalled_receive():
+            await asyncio.sleep(10)
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(_message):
+            pass
+
+        task = asyncio.create_task(middleware(
+            {"type": "http", "method": "POST", "path": "/api/v1/sarvam/transcribe", "headers": []},
+            stalled_receive,
+            send,
+        ))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    anyio.run(run_cancelled)
+    assert created_spools and created_spools[0].closed
+    assert slots.acquire(blocking=False)
+    slots.release()
+
+
+@pytest.mark.parametrize(
+    "message,expected_status",
+    [
+        ({"type": "http.disconnect"}, None),
+        ({"type": "unsupported.asgi.message"}, 400),
+    ],
+)
+def test_disconnect_and_malformed_stream_clean_spool_and_release_slot(
+    monkeypatch, message, expected_status
+):
+    import app.core.request_limits as limits
+
+    real_spool = limits.tempfile.SpooledTemporaryFile
+    created_spools = []
+
+    def tracked_spool(*args, **kwargs):
+        spool = real_spool(*args, **kwargs)
+        created_spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(limits.tempfile, "SpooledTemporaryFile", tracked_spool)
+    middleware = SarvamRequestBodyLimitMiddleware(
+        lambda *_args: None,
+        max_buffered_requests=1,
+    )
+
+    async def receive_once():
+        return message
+
+    status, downstream_called = run_middleware_with_receive(middleware, receive_once)
+    assert status == expected_status
+    assert downstream_called is False
+    assert created_spools and created_spools[0].closed
+    assert middleware._request_slots.acquire(blocking=False)
+    middleware._request_slots.release()
 
 
 @pytest.mark.parametrize(

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import math
 import threading
 import tempfile
+import time
 
 import anyio
 
@@ -16,6 +19,10 @@ SARVAM_CHAT_BODY_MAX = 128 * 1024
 _BODY_MEMORY_SPOOL_BYTES = 1024 * 1024
 _BODY_READ_CHUNK_BYTES = 64 * 1024
 _MAX_BUFFERED_SARVAM_REQUESTS = threading.BoundedSemaphore(2)
+DEFAULT_UPLOAD_IDLE_TIMEOUT_SECONDS = 10.0
+DEFAULT_UPLOAD_MAX_DURATION_SECONDS = 120.0
+MAX_UPLOAD_IDLE_TIMEOUT_SECONDS = 60.0
+MAX_UPLOAD_DURATION_SECONDS = 600.0
 
 
 class SarvamRequestBodyLimitMiddleware:
@@ -30,8 +37,34 @@ class SarvamRequestBodyLimitMiddleware:
         ("POST", "/api/v1/sarvam/chat"): SARVAM_CHAT_BODY_MAX,
     }
 
-    def __init__(self, app):
+    def __init__(
+        self,
+        app,
+        *,
+        idle_timeout_seconds: float = DEFAULT_UPLOAD_IDLE_TIMEOUT_SECONDS,
+        max_duration_seconds: float = DEFAULT_UPLOAD_MAX_DURATION_SECONDS,
+        max_buffered_requests: int = 2,
+    ):
+        if (
+            not math.isfinite(idle_timeout_seconds)
+            or not 0 < idle_timeout_seconds <= MAX_UPLOAD_IDLE_TIMEOUT_SECONDS
+        ):
+            raise ValueError("Upload idle timeout must be positive and at most 60 seconds.")
+        if (
+            not math.isfinite(max_duration_seconds)
+            or not 0 < max_duration_seconds <= MAX_UPLOAD_DURATION_SECONDS
+        ):
+            raise ValueError("Maximum upload duration must be positive and at most 600 seconds.")
+        if max_buffered_requests < 1:
+            raise ValueError("At least one buffered request slot is required.")
         self.app = app
+        self.idle_timeout_seconds = idle_timeout_seconds
+        self.max_duration_seconds = max_duration_seconds
+        self._request_slots = (
+            _MAX_BUFFERED_SARVAM_REQUESTS
+            if max_buffered_requests == 2
+            else threading.BoundedSemaphore(max_buffered_requests)
+        )
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -60,19 +93,33 @@ class SarvamRequestBodyLimitMiddleware:
                 await self._reject(send, 413, "Request body exceeds the upload limit.")
                 return
 
-        if not _MAX_BUFFERED_SARVAM_REQUESTS.acquire(blocking=False):
+        if not self._request_slots.acquire(blocking=False):
             await self._reject(send, 429, "Upload capacity is temporarily full.")
             return
 
         total = 0
-        spool = tempfile.SpooledTemporaryFile(max_size=_BODY_MEMORY_SPOOL_BYTES, mode="w+b")
+        spool = None
         try:
+            started_at = time.monotonic()
+            spool = tempfile.SpooledTemporaryFile(max_size=_BODY_MEMORY_SPOOL_BYTES, mode="w+b")
             while True:
-                message = await receive()
+                remaining_duration = self.max_duration_seconds - (time.monotonic() - started_at)
+                if remaining_duration <= 0:
+                    await self._reject(send, 408, "Request body upload timed out.")
+                    return
+                try:
+                    message = await asyncio.wait_for(
+                        receive(),
+                        timeout=min(self.idle_timeout_seconds, remaining_duration),
+                    )
+                except asyncio.TimeoutError:
+                    await self._reject(send, 408, "Request body upload timed out.")
+                    return
                 if message["type"] == "http.disconnect":
                     return
                 if message["type"] != "http.request":
-                    continue
+                    await self._reject(send, 400, "Malformed request body stream.")
+                    return
                 chunk = message.get("body", b"")
                 total += len(chunk)
                 if total > limit:
@@ -80,6 +127,9 @@ class SarvamRequestBodyLimitMiddleware:
                     return
                 if chunk:
                     await anyio.to_thread.run_sync(spool.write, chunk)
+                if time.monotonic() - started_at >= self.max_duration_seconds:
+                    await self._reject(send, 408, "Request body upload timed out.")
+                    return
                 if not message.get("more_body", False):
                     break
 
@@ -105,8 +155,11 @@ class SarvamRequestBodyLimitMiddleware:
 
             await self.app(scope, replay_body, send)
         finally:
-            spool.close()
-            _MAX_BUFFERED_SARVAM_REQUESTS.release()
+            try:
+                if spool is not None:
+                    spool.close()
+            finally:
+                self._request_slots.release()
 
     @staticmethod
     async def _reject(send, status_code: int, detail: str) -> None:

@@ -1,6 +1,6 @@
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import Project, ProjectAccess, User
@@ -40,3 +40,21 @@ def require_project_access(
         raise HTTPException(403, "Write permission denied")
 
     return project
+
+
+def lookup_eligible_user(db, project_id, user_id):
+
+    if db.get_bind().dialect.name == "postgresql":
+        return db.execute(
+            text(
+                "SELECT * FROM sentinel_security.eligible_user("
+                ":pid, :uid)"
+            ),
+            {"pid": project_id, "uid": user_id},
+        ).one_or_none()
+
+    return db.execute(
+        select(User.id, User.role, User.active).where(
+            User.id == user_id
+        )
+    ).one_or_none()

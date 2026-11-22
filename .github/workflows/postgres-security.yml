@@ -1,0 +1,55 @@
+﻿name: PostgreSQL Security Validation
+
+on:
+  push:
+    branches:
+      - feature/postgres-runtime-security
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.7
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: isolated-ci-test-only
+          POSTGRES_DB: sentinel_rls_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create restricted role
+        env:
+          PGPASSWORD: isolated-ci-test-only
+        run: |
+          psql -h 127.0.0.1 -U postgres -d sentinel_rls_test -v ON_ERROR_STOP=1 -c "CREATE ROLE sentinel_app NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;"
+
+      - name: Validate PostGIS migrations and complete workflow
+        env:
+          SENTINEL_CI_DB_PASSWORD: isolated-ci-test-only
+        run: python scripts/check_postgis_migration.py

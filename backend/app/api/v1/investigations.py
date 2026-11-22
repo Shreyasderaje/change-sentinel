@@ -1,3 +1,4 @@
+from app.services.permissions import lookup_eligible_user
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -193,11 +194,11 @@ def assign_investigation(
             409, "Only open investigations can be assigned"
         )
 
-    officer = db.execute(
-        select(User.id, User.role, User.active).where(
-            User.id == payload.assigned_to_id
-        )
-    ).one_or_none()
+    officer = lookup_eligible_user(
+        db,
+        investigation.project_id,
+        payload.assigned_to_id,
+    )
 
     if officer is None or officer.role != "officer" or not officer.active:
         raise HTTPException(404, "Eligible officer not found")

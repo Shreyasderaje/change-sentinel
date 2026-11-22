@@ -1,3 +1,4 @@
+from app.services.permissions import lookup_eligible_user
 
 from fastapi import (
     APIRouter,
@@ -52,11 +53,9 @@ def add_member(
             409, "Project owner already has access"
         )
 
-    member = db.execute(
-        select(User.id, User.role, User.active).where(
-            User.id == payload.user_id
-        )
-    ).one_or_none()
+    member = lookup_eligible_user(
+        db, project_id, payload.user_id
+    )
 
     if (
         member is None

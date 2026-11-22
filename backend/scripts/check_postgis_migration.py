@@ -64,11 +64,26 @@ try:
             "host(inet_server_addr())"
         )).one()
 
-        assert tuple(identity) == (
-            "sentinel_rls_test",
-            "postgres",
-            "127.0.0.1",
-        )
+        import ipaddress
+
+        assert identity[0] == "sentinel_rls_test"
+        assert identity[1] == "postgres"
+
+        server_ip = ipaddress.ip_address(identity[2])
+
+        if (
+            os.environ.get("GITHUB_ACTIONS") == "true"
+            and os.environ.get("SENTINEL_CI_DB_PASSWORD")
+        ):
+            assert server_ip.is_private, (
+                "Expected isolated CI database"
+            )
+        else:
+            assert server_ip.is_loopback, (
+                "Expected local PostgreSQL database"
+            )
+
+        print("PASS: Database identity and network verified")
 
         flags = conn.execute(text("""
             SELECT rolcanlogin, rolsuper, rolbypassrls,

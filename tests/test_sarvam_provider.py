@@ -80,6 +80,21 @@ def test_invalid_audio_configuration_is_rejected():
         sarvam.transcribe_audio(b"not wav", "clip.wav", "audio/wav", config=TEST_CONFIG, client=mock_client())
 
 
+def test_detected_audio_format_must_match_filename_and_declared_mime(monkeypatch):
+    monkeypatch.setattr(
+        sarvam,
+        "MutagenFile",
+        lambda _file: SimpleNamespace(
+            info=SimpleNamespace(length=1.0),
+            mime=["audio/mpeg"],
+        ),
+    )
+    with pytest.raises(sarvam.SarvamInputError, match="Detected audio format"):
+        sarvam.transcribe_audio(
+            wav_bytes(), "clip.wav", "audio/wav", config=TEST_CONFIG, client=mock_client()
+        )
+
+
 def test_maximum_audio_size_is_enforced():
     with pytest.raises(sarvam.SarvamInputError, match="25 MB"):
         sarvam.transcribe_audio(

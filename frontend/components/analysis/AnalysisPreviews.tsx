@@ -9,7 +9,7 @@ export function AnalysisPreviews({ result }: { result: Analysis | null }) {
     <section className="glass-panel rounded-2xl p-4 sm:p-6">
       <div className="mb-4">
         <h3 className="font-semibold text-white">Analysis previews</h3>
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="mt-1 type-detail text-slate-400">
           Processed at {result.processed_size.width} × {result.processed_size.height} px · candidate differences require human review.
         </p>
       </div>
@@ -20,11 +20,11 @@ export function AnalysisPreviews({ result }: { result: Analysis | null }) {
         ].map((image) => (
           <figure key={image.label} className="overflow-hidden rounded-xl border border-white/10 bg-slate-950/40">
             <img className="max-h-[480px] w-full object-contain" src={`data:image/png;base64,${image.src}`} alt={image.label} />
-            <figcaption className="px-3 py-2 text-xs text-slate-300">{image.label}</figcaption>
+            <figcaption className="px-3 py-2 type-meta text-slate-300">{image.label}</figcaption>
           </figure>
         ))}
       </div>
-      <p className="mt-4 text-xs leading-5 text-slate-400">{result.alignment_note} {result.geo_note}</p>
+      <p className="mt-4 type-detail text-slate-300">{result.alignment_note} {result.geo_note}</p>
     </section>
   );
 }

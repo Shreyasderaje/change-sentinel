@@ -50,17 +50,17 @@ export function RegionReviewCard({
     >
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2">
-          <span className="size-6 shrink-0 place-items-center rounded-lg border border-cyan-200/10 bg-cyan-300/[0.06] text-cyan-200 text-[10px] font-semibold">
+          <span className="size-6 shrink-0 place-items-center rounded-lg border border-cyan-200/10 bg-cyan-300/[0.06] text-cyan-200 type-meta font-semibold">
             #{region.region_id}
           </span>
           <ReviewStatusBadge status={status} />
         </div>
-        <div className="text-right text-[10px] text-slate-500">
+        <div className="text-right type-meta text-slate-500">
           {region.mean_difference.toFixed(3)} mean diff
         </div>
       </div>
 
-      <div className="grid gap-2 text-xs text-slate-300 mb-3">
+      <div className="grid gap-2 type-detail text-slate-200 mb-3">
         <div className="flex justify-between">
           <span className="text-slate-500">Centroid (x, y):</span>
           <span className="text-slate-200">{Math.round(x)}, {Math.round(y)}</span>
@@ -91,48 +91,48 @@ export function RegionReviewCard({
       </div>
 
       <div className="space-y-2">
-        <label className="block text-[10px] font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">
-          Analyst notes
+        <label className="block type-control font-semibold text-slate-300 mb-1">
+          Field notes · local draft
         </label>
         <textarea
           value={notes}
           onChange={handleNotesChange}
           rows={2}
-          className="w-full rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 focus:border-cyan-500/50 focus:outline-none transition border-color"
-          placeholder="Field verification notes…"
+          className="w-full rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 type-meta text-slate-200 focus:border-cyan-500/50 focus:outline-none transition border-color"
+          placeholder="Record an observation for this page only…"
         />
       </div>
 
       <div className="flex items-center gap-2 mt-3">
         <button
           onClick={() => handleStatusChange("approved")}
-          className={`flex-1 py-1.5 rounded-lg text-[10px] font-semibold transition ${
+          className={`flex-1 py-1.5 rounded-lg type-meta font-semibold transition ${
             status === "approved"
               ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-400"
               : "bg-white/[0.03] border border-white/10 text-slate-400 hover:border-emerald-500/30 hover:text-emerald-400"
           }`}
         >
-          Approve
+          Approve draft
         </button>
         <button
           onClick={() => handleStatusChange("rejected")}
-          className={`flex-1 py-1.5 rounded-lg text-[10px] font-semibold transition ${
+          className={`flex-1 py-1.5 rounded-lg type-meta font-semibold transition ${
             status === "rejected"
               ? "bg-red-500/20 border border-red-500/30 text-red-400"
               : "bg-white/[0.03] border border-white/10 text-slate-400 hover:border-red-500/30 hover:text-red-400"
           }`}
         >
-          Reject
+          Reject draft
         </button>
         <button
           onClick={() => handleStatusChange("flagged")}
-          className={`flex-1 py-1.5 rounded-lg text-[10px] font-semibold transition ${
+          className={`flex-1 py-1.5 rounded-lg type-meta font-semibold transition ${
             status === "flagged"
               ? "bg-amber-500/20 border border-amber-500/30 text-amber-400"
               : "bg-white/[0.03] border border-white/10 text-slate-400 hover:border-amber-500/30 hover:text-amber-400"
           }`}
         >
-          Flag
+          Flag draft
         </button>
       </div>
     </article>

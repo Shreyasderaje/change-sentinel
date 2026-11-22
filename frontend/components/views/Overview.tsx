@@ -1,94 +1,121 @@
 "use client";
 
 import Image from "next/image";
-
-import { useState, type ReactNode } from "react";
+import { OrbitalIntelligence } from "@/components/motion/OrbitalIntelligence";
 import { Icon } from "@/components/ui/Icon";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { navigation, type View } from "@/lib/types";
+import { getDisplayNameForRole } from "@/lib/role-nav";
+import type { Analysis, UserRole, View } from "@/lib/types";
 
-function PairPreview({ large = false }: { large?: boolean }) {
+const roleStation: Record<UserRole, { title: string; description: string; action: string; target: View; status: string }> = {
+  admin: {
+    title: "Administration workspace",
+    description: "User management and system controls are unavailable until their backend endpoints are deployed.",
+    action: "Open analysis report",
+    target: "report",
+    status: "Admin controls unavailable",
+  },
+  analyst: {
+    title: "Analyst station",
+    description: "Run the available image comparison workflow and review its candidate differences. Project data is not connected here.",
+    action: "Open image workspace",
+    target: "workspace",
+    status: "Analysis from uploaded imagery",
+  },
+  officer: {
+    title: "Field verification station",
+    description: "Review candidate regions and prepare a voice note. Field decisions remain local drafts until a save endpoint is available.",
+    action: "Open field review",
+    target: "field-review",
+    status: "Human review required",
+  },
+};
+
+function PairPreview() {
   return (
-    <div className={`grid gap-3 ${large ? "md:grid-cols-2" : "sm:grid-cols-2"}`}>
+    <div className="grid gap-3 sm:grid-cols-2">
       {[
-        {
-          label: "BEFORE CAPTURE",
-          src: "/images/demo-before.png",
-          alt: "Synthetic demonstration aerial scene before the sample change",
-        },
-        {
-          label: "AFTER CAPTURE",
-          src: "/images/demo-after.png",
-          alt: "Synthetic demonstration aerial scene after the sample change",
-        },
+        { label: "BEFORE CAPTURE", src: "/images/demo-before.png", alt: "Synthetic demonstration scene before the sample change" },
+        { label: "AFTER CAPTURE", src: "/images/demo-after.png", alt: "Synthetic demonstration scene after the sample change" },
       ].map((image) => (
         <figure key={image.label} className="group overflow-hidden rounded-xl border border-sky-200/15 bg-slate-950/50">
-          <div className={`relative ${large ? "aspect-[16/9]" : "aspect-[1.45/1]"}`}>
-            <Image src={image.src} alt={image.alt} fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover transition-transform duration-500 group-hover:scale-[1.025]" />
-            <span className="absolute left-3 top-3 rounded-md border border-white/15 bg-slate-950/70 px-2.5 py-1 text-[9px] font-semibold tracking-[.16em] text-sky-100 backdrop-blur">{image.label}</span>
+          <div className="relative aspect-[1.45/1]">
+            <Image src={image.src} alt={image.alt} fill sizes="(max-width: 640px) 100vw, 50vw" className="object-cover transition-transform duration-500 group-hover:scale-[1.025]" />
+            <span className="absolute left-3 top-3 rounded-md border border-white/15 bg-slate-950/75 px-2.5 py-1 type-meta font-semibold tracking-[.08em] text-sky-100 backdrop-blur">{image.label}</span>
           </div>
-          <figcaption className="flex items-center justify-between px-3 py-2.5 text-[11px] text-slate-300/75">
-            <span>Synthetic demo imagery</span><span>RGB · preview</span>
-          </figcaption>
+          <figcaption className="flex items-center justify-between px-3 py-2.5 type-meta text-slate-400"><span>Synthetic demo scene</span><span>RGB preview</span></figcaption>
         </figure>
       ))}
     </div>
   );
 }
-function LiveWorkflowCard({ onNavigate }: { onNavigate: (view: View) => void }) {
-  return (
-    <div className="rounded-2xl border border-cyan-200/15 bg-gradient-to-br from-blue-500/[0.12] via-slate-950/35 to-cyan-400/[0.06] p-5 sm:p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[.2em] text-cyan-200/80">Live detection workflow</p>
-          <h3 className="mt-2 text-lg font-semibold text-white">Analyze imagery in this workspace</h3>
-          <p className="mt-2 max-w-lg text-sm leading-6 text-slate-300/75">Upload a before-and-after pair to run the existing RGB difference pipeline, review candidate regions, and export a report.</p>
-        </div>
-        <span className="hidden size-11 shrink-0 place-items-center rounded-2xl border border-cyan-200/20 bg-cyan-300/[0.07] text-cyan-200 sm:grid"><Icon name="satellite" size={22} /></span>
-      </div>
-      <button onClick={() => onNavigate("workspace")} className="mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-200/15 bg-sky-300/[0.06] px-4 text-xs font-semibold text-sky-100 transition hover:border-cyan-200/35 hover:bg-sky-300/[0.10]">Open workspace <Icon name="arrow" size={14} /></button>
-    </div>
-  );
-}
 
-export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
+export function Overview({ onNavigate, role = null, result = null }: { onNavigate: (view: View) => void; role?: UserRole | null; result?: Analysis | null }) {
+  const station = role ? roleStation[role] : null;
+
   return (
-    <div className="fade-in space-y-7">
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[.22em] text-cyan-200/75">Operations / Overview</p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-[28px]">Geospatial change workspace</h2>
-        <p className="mt-1.5 text-sm text-slate-300/70">A clear starting point for image review and candidate-change analysis.</p>
-      </div>
-      <StatusPill><span className="size-1.5 rounded-full bg-emerald-300 shadow-[0_0_10px_rgba(110,255,207,.8)]" /> Prototype · Human review required</StatusPill>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Analysis state" value="Web ready" detail="Upload a pair in this dashboard" icon="results" />
-        <MetricCard label="Detection method" value="Classical vision" detail="RGB pixel differencing and region extraction" icon="overview" />
-        <MetricCard label="Coordinates" value="Metadata only" detail="Geographic coordinates require valid GeoTIFF metadata" icon="map" />
-        <MetricCard label="Report export" value="Markdown" detail="Generated by the live analysis workflow" icon="report" />
-      </div>
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(290px,.8fr)]">
-        <section className="glass-panel rounded-2xl p-4 sm:p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="font-semibold text-white">Image comparison workspace</h3>
-              <p className="mt-1 text-xs text-slate-400">Bundled sample pair shown for interface preview only.</p>
-            </div>
-            <StatusPill><span className="size-1.5 rounded-full bg-amber-300" /> Synthetic demo</StatusPill>
+    <div className="mission-entrance space-y-6">
+      <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(420px,.95fr)]">
+        <section className="flex flex-col justify-center py-2 sm:py-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill><span className="size-1.5 rounded-full bg-cyan-200" /> MISSION OVERVIEW</StatusPill>
+            {role && <span className="rounded-full border border-white/10 bg-white/[.03] px-3 py-1.5 type-meta text-slate-300">{getDisplayNameForRole(role)}</span>}
           </div>
-          <PairPreview />
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-4">
-            <p className="max-w-md text-xs leading-5 text-slate-400">These source images are synthetic and do not represent a real place or a computed detection result.</p>
-            <button onClick={() => onNavigate("workspace")} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-cyan-100 transition hover:bg-white/[0.06]">Open workspace <Icon name="arrow" size={15} /></button>
+          <p className="mt-6 font-mono type-meta uppercase tracking-[.08em] text-cyan-200/60">Change Sentinel · Geospatial intelligence</p>
+          <h2 className="mt-3 max-w-2xl text-3xl font-semibold leading-tight tracking-[-.035em] text-white sm:text-4xl xl:text-[42px]">Understand what changed.<br /><span className="text-slate-300">Review what matters.</span></h2>
+          <p className="mt-4 max-w-xl text-sm leading-6 text-slate-300/75">Compare image pairs, examine measured candidate differences, and keep human verification at the center of every decision.</p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button onClick={() => onNavigate("workspace")} className="primary-link inline-flex min-h-11 items-center gap-2 rounded-xl px-4 type-meta font-semibold text-white">Open image workspace<Icon name="arrow" size={14} /></button>
+            <button onClick={() => onNavigate("field-review")} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[.03] px-4 type-meta font-medium text-slate-200 transition hover:border-cyan-200/25 hover:bg-white/[.06]">Review candidates<Icon name="map" size={15} /></button>
           </div>
         </section>
-        <div className="space-y-5">
-          <LiveWorkflowCard onNavigate={onNavigate} />
-          <section className="glass-panel rounded-2xl p-5">
-            <div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-sky-200/10 bg-sky-300/[0.06] text-sky-200"><Icon name="check" size={18} /></span><div><h3 className="text-sm font-semibold text-white">Analyst-first by design</h3><p className="mt-1 text-xs text-slate-400">Candidate differences are not confirmed events.</p></div></div>
-            <p className="mt-4 text-xs leading-5 text-slate-300/70">The current engine uses classical image processing. Clouds, shadows, seasonal changes, illumination, and misalignment can all produce candidates that need human verification.</p>
-          </section>
-        </div>
+        <OrbitalIntelligence />
+      </div>
+
+      {role && station && (
+        <section className="glass-panel flex flex-col justify-between gap-4 rounded-2xl p-4 sm:flex-row sm:items-center sm:p-5" aria-label={`${getDisplayNameForRole(role)} workspace`}>
+          <div>
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-white">{station.title}</h3><span className="rounded-md border border-sky-200/10 bg-sky-300/[.04] px-2 py-1 type-meta uppercase tracking-wide text-sky-100/70">{station.status}</span></div>
+            <p className="mt-1.5 max-w-3xl type-detail text-slate-400">{station.description}</p>
+          </div>
+          <button onClick={() => onNavigate(station.target)} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-200/15 bg-cyan-300/[.05] px-3 type-meta font-medium text-cyan-50 transition hover:border-cyan-200/30">{station.action}<Icon name="arrow" size={13} /></button>
+        </section>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Analysis mode" value="RGB comparison" detail="Classical image differencing" icon="results" />
+        <MetricCard label="Output" value="Candidates" detail="Require human verification" icon="overview" />
+        <MetricCard label="Coordinates" value="Metadata only" detail="Available from valid GeoTIFF metadata" icon="map" />
+        <MetricCard label="Report export" value="Markdown" detail="Generated from the current run" icon="report" />
+      </div>
+
+      <section className="mission-status-strip" aria-label="Current analysis state">
+        <div><span className="mission-status-kicker">CURRENT ANALYSIS</span><strong>{result ? `${result.stats.candidate_region_count} candidate regions` : "No comparison run in this session"}</strong><small>{result ? "Computed measurements · unverified" : "Upload an image pair to begin"}</small></div>
+        <div><span className="mission-status-kicker">NEXT STEP</span><strong>{result ? "Review candidate regions" : "Choose before and after imagery"}</strong><small>{result ? "Field decisions remain local drafts" : "The analysis API is configured separately"}</small></div>
+        <div><span className="mission-status-kicker">DATA LABEL</span><strong>{result ? "User supplied imagery" : "Synthetic examples below"}</strong><small>No live satellite feed is connected</small></div>
+        <button type="button" className="mission-status-action" onClick={() => onNavigate(result ? "results" : "workspace")}>{result ? "View results" : "Start comparison"}<Icon name="arrow" size={13} /></button>
+      </section>
+
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
+        <section className="glass-panel rounded-2xl p-4 sm:p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div><h3 className="font-semibold text-white">Image comparison workspace</h3><p className="mt-1 type-detail text-slate-400">Bundled pair shown as synthetic demo imagery only.</p></div>
+            <span className="rounded-full border border-amber-200/15 bg-amber-200/[.04] px-3 py-1.5 type-meta text-amber-100/80">Illustrative data</span>
+          </div>
+          <PairPreview />
+          <p className="mt-4 border-t border-white/[.08] pt-4 type-detail text-slate-400">These images do not depict a real location and are not the output of a computed detection run.</p>
+        </section>
+        <section className="glass-panel rounded-2xl p-5">
+          <p className="type-meta font-semibold uppercase tracking-[.08em] text-cyan-200/65">Review standard</p>
+          <h3 className="mt-2 text-lg font-semibold text-white">Candidates are not conclusions</h3>
+          <p className="mt-3 type-detail text-slate-300/85">Shadows, clouds, seasonal variation, illumination, and alignment can all create apparent differences. Use the measurements as review material, not as confirmed events.</p>
+          <div className="mt-5 space-y-3 border-t border-white/[.08] pt-4 type-detail text-slate-200/85">
+            <div className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-cyan-300" /> Compare a before-and-after pair</div>
+            <div className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-blue-300" /> Inspect candidate regions</div>
+            <div className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-amber-300" /> Record review separately</div>
+          </div>
+        </section>
       </div>
     </div>
   );

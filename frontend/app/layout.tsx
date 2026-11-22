@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Change Sentinel | Geospatial Intelligence",
+  title: "Change Sentinel 2.0 | Geospatial Intelligence",
   description:
-    "Satellite imagery change review workspace. Run verified analysis in the live Change Sentinel application.",
+    "Transform satellite imagery into actionable geospatial intelligence. Detect candidate changes, understand their context, and coordinate human verification.",
 };
 
 export const viewport: Viewport = {
@@ -17,7 +17,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       <body>{children}</body>
     </html>
   );

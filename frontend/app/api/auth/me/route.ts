@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import type { UserRole } from "@/lib/types";
-
-const validRoles: UserRole[] = ["admin", "analyst", "officer"];
+import { mapBackendProfile } from "@/lib/auth-status";
 
 function unauthenticated(clearCookie = false) {
   const response = NextResponse.json({
@@ -60,42 +58,10 @@ export async function GET() {
 
     const userData: unknown = await backendResponse.json();
 
-    if (
-      typeof userData !== "object" ||
-      userData === null ||
-      !("authenticated" in userData) ||
-      !("role" in userData) ||
-      !("id" in userData) ||
-      !("email" in userData)
-    ) {
-      return unauthenticated();
-    }
+    const profile = mapBackendProfile(userData);
+    if (!profile) return unauthenticated(true);
 
-    const user = userData as {
-      authenticated: boolean;
-      id: string;
-      email: string;
-      role: UserRole;
-    };
-
-    if (
-      user.authenticated !== true ||
-      typeof user.id !== "string" ||
-      typeof user.email !== "string" ||
-      !validRoles.includes(user.role)
-    ) {
-      return unauthenticated();
-    }
-
-    return NextResponse.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-      },
-      authenticated: true,
-      role: user.role,
-    });
+    return NextResponse.json(profile, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return unauthenticated();
   }

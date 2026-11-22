@@ -8,33 +8,34 @@ import type { IconName, UserRole, View } from "./types";
 // rather than creating an unrelated second navigation system.
 
 export type RoleNavItem = {
-  id: View | string;
+  id: View | "user-management" | "system-status";
   label: string;
   icon: IconName;
+  available: boolean;
 };
 
 export const ROLE_NAVIGATION: Record<UserRole, RoleNavItem[]> = {
   analyst: [
-    { id: "overview", label: "Overview", icon: "overview" },
-    { id: "workspace", label: "Workspace", icon: "image" },
-    { id: "results", label: "Results", icon: "results" },
-    { id: "field-review", label: "Field Review", icon: "map" },
-    { id: "report", label: "Reports", icon: "report" },
-    { id: "history", label: "History", icon: "external" },
+    { id: "overview", label: "Mission overview", icon: "overview", available: true },
+    { id: "workspace", label: "Image workspace", icon: "image", available: true },
+    { id: "results", label: "Candidate results", icon: "results", available: true },
+    { id: "field-review", label: "Review drafts", icon: "map", available: true },
+    { id: "report", label: "Analysis report", icon: "report", available: true },
+    { id: "investigation-copilot", label: "Investigation Copilot", icon: "results", available: true },
   ],
   officer: [
-    { id: "overview", label: "Overview", icon: "overview" },
-    { id: "assigned-regions", label: "Assigned Regions", icon: "map" },
-    { id: "field-investigations", label: "Field Investigations", icon: "results" },
-    { id: "submit-observations", label: "Submit Observations", icon: "check" },
-    { id: "verification-history", label: "Verification History", icon: "external" },
+    { id: "overview", label: "Mission overview", icon: "overview", available: true },
+    { id: "field-review", label: "Field review", icon: "map", available: true },
+    { id: "workspace", label: "Image workspace", icon: "image", available: true },
+    { id: "results", label: "Candidate results", icon: "results", available: true },
+    { id: "investigation-copilot", label: "Investigation Copilot", icon: "results", available: true },
   ],
   admin: [
-    { id: "overview", label: "Overview", icon: "overview" },
-    { id: "user-management", label: "User Management", icon: "overview" },
-    { id: "project-monitoring", label: "Project Monitoring", icon: "image" },
-    { id: "report", label: "Reports", icon: "report" },
-    { id: "system-status", label: "System Status", icon: "external" },
+    { id: "overview", label: "Mission overview", icon: "overview", available: true },
+    { id: "user-management", label: "User management", icon: "overview", available: false },
+    { id: "system-status", label: "System status", icon: "external", available: false },
+    { id: "report", label: "Analysis report", icon: "report", available: true },
+    { id: "investigation-copilot", label: "Investigation Copilot", icon: "results", available: true },
   ],
 };
 
@@ -56,4 +57,28 @@ export function getNavigationForRole(role: UserRole): RoleNavItem[] {
 
 export function getDisplayNameForRole(role: UserRole): string {
   return ROLE_DISPLAY_NAMES[role] ?? role;
+}
+
+export function getViewsForRole(role: UserRole | null): View[] {
+  if (!role) return ["overview", "workspace", "results", "report", "field-review", "investigation-copilot"];
+  return getNavigationForRole(role)
+    .filter((item): item is RoleNavItem & { id: View } => item.available &&
+      ["overview", "workspace", "results", "report", "field-review", "investigation-copilot"].includes(item.id))
+    .map((item) => item.id);
+}
+
+export function resolveViewForRole(role: UserRole | null, requested: View): View {
+  return getViewsForRole(role).includes(requested) ? requested : "overview";
+}
+
+export function transitionDashboardNavigation(
+  current: { activeView: View; mobileMenuOpen: boolean },
+  requested: View,
+  role: UserRole | null,
+) {
+  return {
+    activeView: resolveViewForRole(role, requested),
+    mobileMenuOpen: false,
+    previousView: current.activeView,
+  };
 }

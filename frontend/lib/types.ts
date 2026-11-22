@@ -30,7 +30,8 @@ export type View =
   | "workspace"
   | "results"
   | "report"
-  | "field-review";
+  | "field-review"
+  | "investigation-copilot";
 
 export type IconName =
   | "satellite"
@@ -51,6 +52,7 @@ export const navigation: { id: View; label: string; icon: IconName }[] = [
   { id: "results", label: "Results summary", icon: "results" },
   { id: "report", label: "Analysis report", icon: "report" },
   { id: "field-review", label: "Field review", icon: "map" },
+  { id: "investigation-copilot", label: "Investigation Copilot", icon: "results" },
 ];
 
 export type ReviewStatus = "pending" | "approved" | "rejected" | "flagged";
@@ -64,19 +66,6 @@ export type RegionReview = {
 
 export type FieldReviewState = {
   [region_id: number]: RegionReview;
-};
-
-export type SarvamAnalysisRequest = {
-  regions: Analysis["regions"];
-  stats: Analysis["stats"];
-  geo_note: string;
-  alignment_note: string;
-};
-
-export type SarvamAnalysisResponse = {
-  summary: string;
-  risk_assessment: string;
-  recommended_actions: string[];
 };
 
 // ---------------------------------------------------------------------------

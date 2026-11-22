@@ -89,10 +89,10 @@ The Streamlit app remains available as above. The same repository also
 contains a separate FastAPI service used by the Next.js dashboard.
 
 ```bash
-# From the repository root, install the added API dependencies with the
-# existing Python requirements, then start the API:
+# From the repository root, install the legacy image-analysis dependencies,
+# then start the root api.py service on port 8001:
 python -m pip install -r requirements.txt
-uvicorn api:app --reload --port 8000
+python -m uvicorn api:app --reload --port 8001
 ```
 
 The API exposes `GET /health` and `POST /analyze`. Analysis uploads use
@@ -102,11 +102,17 @@ to 20 MB and 40 megapixels. Set `CORS_ORIGINS` to a comma-separated list of
 allowed browser origins (for example `http://localhost:3000` locally). In a
 deployed API, set this to the exact Vercel frontend origin.
 
+Start the authenticated/project API separately from `backend` using Docker
+Compose on port 8000. It handles `/api/v1/*` and does not provide the legacy
+image-analysis `/analyze` route.
+
 In a second terminal:
 
 ```bash
 cd frontend
-# Set NEXT_PUBLIC_API_URL=http://localhost:8000 in frontend/.env.local
+# The authenticated backend (Docker) and legacy analysis API are separate.
+# Set BACKEND_API_URL=http://localhost:8000 for login and authenticated routes.
+# Set NEXT_PUBLIC_API_URL=http://localhost:8001 for image analysis.
 npm install
 npm run dev
 ```
@@ -123,9 +129,10 @@ npm run build
 For Render, create a **separate** web service from this repository for the
 API, with start command `uvicorn api:app --host 0.0.0.0 --port $PORT`, and
 set `CORS_ORIGINS` to the Vercel production origin. Keep the existing
-Streamlit Render service pointed at `streamlit run app.py`. Set
-`NEXT_PUBLIC_API_URL` in Vercel to the new API service URL and redeploy the
-frontend after configuration.
+Streamlit Render service pointed at `streamlit run app.py`. Configure the
+frontend's server-only `BACKEND_API_URL` for the authenticated Docker backend
+and `NEXT_PUBLIC_API_URL` for the separately deployed legacy root `api.py`
+analysis service. Set CORS on the latter to the exact deployed frontend origin.
 
 ### Try it in 30 seconds
 

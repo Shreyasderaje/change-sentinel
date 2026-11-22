@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
@@ -46,7 +46,7 @@ export function OfficerDashboard() {
   return (
     <div className="fade-in space-y-6">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[.22em] text-cyan-200/75">
+        <p className="type-meta font-semibold uppercase tracking-[.08em] text-cyan-200/75">
           Officer Dashboard
         </p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-[28px]">
@@ -85,23 +85,23 @@ export function OfficerDashboard() {
               >
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
-                    <span className="text-xs font-medium text-white">
+                    <span className="type-meta font-medium text-white">
                       {region.location_name}
                     </span>
-                    <p className="text-[9px] text-slate-400">
+                    <p className="type-detail text-slate-300">
                       {region.project_name}
                     </p>
                   </div>
 
                   <span
-                    className={`rounded-md px-2 py-0.5 text-[9px] ${statusColors[region.status]}`}
+                    className={`rounded-md px-2 py-0.5 type-meta ${statusColors[region.status]}`}
                   >
                     {region.status}
                   </span>
                 </div>
 
                 {region.coordinates && (
-                  <div className="mb-3 flex items-center gap-2 text-[9px] text-slate-500">
+                  <div className="mb-3 flex items-center gap-2 type-meta text-slate-500">
                     <Icon name="map" size={12} />
                     <span>
                       {region.coordinates[0].toFixed(4)},{" "}
@@ -110,7 +110,7 @@ export function OfficerDashboard() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between text-xs text-slate-300">
+                <div className="flex items-center justify-between type-meta text-slate-300">
                   <span>Due: {region.due_date.slice(0, 10)}</span>
                   <span>
                     {region.before_image_url
@@ -137,22 +137,22 @@ export function OfficerDashboard() {
               >
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
-                    <span className="text-xs font-medium text-white">
+                    <span className="type-meta font-medium text-white">
                       {inv.title}
                     </span>
-                    <p className="text-[9px] text-slate-400">
+                    <p className="type-detail text-slate-300">
                       Region #{inv.region_id}
                     </p>
                   </div>
 
                   <span
-                    className={`text-[9px] font-medium ${priorityColors[inv.priority]}`}
+                    className={`type-meta font-medium ${priorityColors[inv.priority]}`}
                   >
                     {inv.priority}
                   </span>
                 </div>
 
-                <div className="mb-3 flex items-center justify-between text-[9px] text-slate-500">
+                <div className="mb-3 flex items-center justify-between type-meta text-slate-500">
                   <span>{inv.status}</span>
                   <span>{inv.created_at.slice(0, 10)}</span>
                 </div>
@@ -160,14 +160,14 @@ export function OfficerDashboard() {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="flex-1 rounded-lg border border-cyan-200/20 bg-cyan-300/[0.06] py-2 text-[10px] font-medium text-cyan-100 hover:bg-cyan-300/[0.10]"
+                    className="flex-1 rounded-lg border border-cyan-200/20 bg-cyan-300/[0.06] py-2 type-meta font-medium text-cyan-100 hover:bg-cyan-300/[0.10]"
                   >
                     View Details
                   </button>
 
                   <button
                     type="button"
-                    className="flex-1 rounded-lg border border-white/10 bg-slate-950/40 py-2 text-[10px] font-medium text-slate-400 hover:border-cyan-500/30"
+                    className="flex-1 rounded-lg border border-white/10 bg-slate-950/40 py-2 type-meta font-medium text-slate-400 hover:border-cyan-500/30"
                   >
                     Submit
                   </button>
@@ -186,7 +186,7 @@ export function OfficerDashboard() {
 
         <div className="space-y-3">
           <div>
-            <label className="mb-2 block text-[10px] font-semibold uppercase tracking-[.1em] text-slate-500">
+            <label className="mb-2 block type-meta font-semibold uppercase tracking-[.1em] text-slate-500">
               Observation
             </label>
             <textarea
@@ -197,18 +197,18 @@ export function OfficerDashboard() {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex items-center gap-2 text-xs text-slate-300">
+            <label className="flex items-center gap-2 type-meta text-slate-300">
               <input type="checkbox" className="accent-cyan-400" />
               <span>Photos attached</span>
             </label>
 
-            <label className="flex items-center gap-2 text-xs text-slate-300">
+            <label className="flex items-center gap-2 type-meta text-slate-300">
               <input type="checkbox" className="accent-cyan-400" />
               <span>Voice note recorded</span>
             </label>
           </div>
 
-          <p className="text-[9px] italic text-slate-500">
+          <p className="type-meta italic text-slate-500">
             Voice note transcription is not implemented. Audio files are stored
             as-is for manual review.
           </p>

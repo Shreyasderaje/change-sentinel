@@ -1,4 +1,5 @@
 import type { LoginRequest, RegisterRequest, UserRole } from "./types";
+import { parseAuthStatus } from "./auth-status";
 
 export async function login(credentials: LoginRequest): Promise<void> {
   const response = await fetch("/api/auth/login", {
@@ -65,21 +66,16 @@ export async function getAuthStatus(): Promise<AuthStatus> {
       credentials: "include",
     });
 
-    const body = await response.json().catch(() => ({}));
+    const body: unknown = await response.json().catch(() => null);
+    const status = parseAuthStatus(body);
 
-    const validRoles: UserRole[] = ["admin", "analyst", "officer"];
-
-    if (
-      !response.ok ||
-      body.authenticated !== true ||
-      !validRoles.includes(body.role)
-    ) {
+    if (!response.ok || !status.authenticated) {
       return { isAuthenticated: false, role: null };
     }
 
     return {
       isAuthenticated: true,
-      role: body.role as UserRole,
+      role: status.role,
     };
   } catch {
     return { isAuthenticated: false, role: null };

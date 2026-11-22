@@ -21,11 +21,7 @@ export default function LoginPage() {
 
     try {
       await login({ email, password });
-      // UI-only auth flag (not JWT). The actual session is in an HttpOnly cookie.
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem("cs_auth_ui", "true");
-      }
-      const returnUrl = pathname === "/login" ? "/" : pathname;
+      const returnUrl = pathname === "/login" ? "/workspace" : pathname;
       router.push(returnUrl);
     } catch (caught) {
       setError(
@@ -37,7 +33,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#030b18] px-4 sm:px-6 lg:px-8">
+    <div className="auth-screen min-h-screen flex items-center justify-center bg-[#030b18] px-4 sm:px-6 lg:px-8">
       <div className="glass-panel w-full max-w-md rounded-2xl p-6 sm:p-8">
         <div className="text-center mb-8">
           <div className="grid size-14 shrink-0 place-items-center rounded-2xl border border-cyan-200/35 bg-gradient-to-br from-blue-500/25 to-cyan-300/[0.08] text-cyan-100 mx-auto shadow-[0_0_25px_rgba(35,145,255,.14)] mb-4">
@@ -64,7 +60,7 @@ export default function LoginPage() {
           <div>
             <label
               htmlFor="email"
-              className="block text-[10px] font-semibold uppercase tracking-[.2em] text-slate-500 mb-2"
+              className="block type-meta font-semibold uppercase tracking-[.08em] text-slate-500 mb-2"
             >
               Email address
             </label>
@@ -84,7 +80,7 @@ export default function LoginPage() {
           <div className="relative">
             <label
               htmlFor="password"
-              className="block text-[10px] font-semibold uppercase tracking-[.2em] text-slate-500 mb-2"
+              className="block type-meta font-semibold uppercase tracking-[.08em] text-slate-500 mb-2"
             >
               Password
             </label>
@@ -102,7 +98,7 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-cyan-400 transition disabled:opacity-60"
+              className="absolute right-3 top-1/2 -translate-y-1/2 type-meta text-slate-400 hover:text-cyan-400 transition disabled:opacity-60"
               disabled={loading}
               aria-label={showPassword ? "Hide password" : "Show password"}
             >
@@ -119,7 +115,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-8 text-center text-xs text-slate-500">
+        <p className="mt-8 text-center type-meta text-slate-500">
           Change Sentinel · Satellite imagery change detection
         </p>
       </div>

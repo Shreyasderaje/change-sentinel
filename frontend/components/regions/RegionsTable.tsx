@@ -7,7 +7,7 @@ export function RegionsTable({ result }: { result: Analysis }) {
     <section className="glass-panel overflow-x-auto rounded-2xl p-4 sm:p-6">
       <h3 className="mb-4 font-semibold text-white">Candidate regions</h3>
       {result.regions.length ? (
-        <table className="w-full min-w-[680px] text-left text-xs">
+        <table className="w-full min-w-[680px] text-left type-meta">
           <thead className="text-slate-400">
             <tr>
               <th className="p-2">ID</th>
@@ -30,7 +30,7 @@ export function RegionsTable({ result }: { result: Analysis }) {
           </tbody>
         </table>
       ) : (
-        <p className="mt-4 text-xs text-slate-400">No candidate regions detected.</p>
+        <p className="mt-4 type-detail text-slate-300">No candidate regions detected.</p>
       )}
     </section>
   );

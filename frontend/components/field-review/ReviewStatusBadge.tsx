@@ -10,25 +10,25 @@ const statusStyles: Record<
     bg: "bg-slate-950/30",
     border: "border-slate-500/30",
     text: "text-slate-400",
-    label: "Pending",
+    label: "Pending draft",
   },
   approved: {
     bg: "bg-emerald-950/20",
     border: "border-emerald-500/30",
     text: "text-emerald-400",
-    label: "Approved",
+    label: "Approved draft",
   },
   rejected: {
     bg: "bg-red-950/20",
     border: "border-red-500/30",
     text: "text-red-400",
-    label: "Rejected",
+    label: "Rejected draft",
   },
   flagged: {
     bg: "bg-amber-950/20",
     border: "border-amber-500/30",
     text: "text-amber-400",
-    label: "Flagged",
+    label: "Flagged draft",
   },
 };
 
@@ -40,7 +40,7 @@ export function ReviewStatusBadge({
   const style = statusStyles[status];
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${style.bg} ${style.border} ${style.text}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 type-meta font-medium ${style.bg} ${style.border} ${style.text}`}
     >
       <span className="size-1.5 rounded-full bg-current opacity-60" />
       {style.label}

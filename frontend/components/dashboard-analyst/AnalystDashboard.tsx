@@ -35,7 +35,7 @@ export function AnalystDashboard() {
   return (
     <div className="fade-in space-y-6">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[.22em] text-cyan-200/75">Analyst Dashboard</p>
+        <p className="type-meta font-semibold uppercase tracking-[.08em] text-cyan-200/75">Analyst Dashboard</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-[28px]">Change Detection Overview</h2>
         <p className="mt-1.5 text-sm text-slate-300/70">Review candidate changes and manage analysis projects.</p>
       </div>
@@ -60,13 +60,13 @@ export function AnalystDashboard() {
                 className="rounded-lg border border-white/[0.08] p-3 hover:border-cyan-500/30 transition border-color cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-2 mb-1">
-                  <span className="text-xs font-medium text-white">{project.name}</span>
-                  <span className={`text-[9px] px-2 py-0.5 rounded-md ${statusColors[project.status]}`}>
+                  <span className="type-meta font-medium text-white">{project.name}</span>
+                  <span className={`type-meta px-2 py-0.5 rounded-md ${statusColors[project.status]}`}>
                     {project.status}
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-400 mb-2">{project.description}</p>
-                <div className="flex items-center justify-between text-xs text-slate-300">
+                <p className="type-detail text-slate-300 mb-2">{project.description}</p>
+                <div className="flex items-center justify-between type-meta text-slate-300">
                   <span>{project.candidate_changes} candidates</span>
                   <span>{project.area_analyzed_km2} km²</span>
                 </div>
@@ -79,15 +79,15 @@ export function AnalystDashboard() {
           <h3 className="mb-4 font-semibold text-white">Recent Analysis Activity</h3>
           <div className="space-y-3">
             {DEMO_ACTIVITIES.slice(0, 5).map((activity) => (
-              <div key={activity.id} className="flex items-start gap-3 text-xs">
+              <div key={activity.id} className="flex items-start gap-3 type-meta">
                 <div className="grid size-4 place-items-center rounded-full border border-cyan-200/10 bg-cyan-300/[0.06] text-cyan-200 shrink-0">
                   <Icon name="results" size={12} />
                 </div>
                 <div>
                   <p className="text-slate-200 leading-5">{activity.action}</p>
-                  <p className="text-[9px] text-slate-500">{activity.target}</p>
+                  <p className="type-meta text-slate-500">{activity.target}</p>
                 </div>
-                <span className="ml-auto text-[9px] text-slate-500">{activity.timestamp.slice(0, 10)}</span>
+                <span className="ml-auto type-meta text-slate-500">{activity.timestamp.slice(0, 10)}</span>
               </div>
             ))}
           </div>
@@ -121,32 +121,32 @@ export function AnalystDashboard() {
             <h3 className="font-semibold text-white">Project Details</h3>
             <button
               onClick={() => setSelectedProject(null)}
-              className="text-[10px] text-cyan-400 hover:text-cyan-300"
+              className="type-meta text-cyan-400 hover:text-cyan-300"
             >
               Close
             </button>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Project Name</p>
+              <p className="type-meta font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Project Name</p>
               <p className="text-sm font-medium text-white">{selectedProject.name}</p>
             </div>
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Status</p>
-              <span className={`text-[9px] px-2 py-0.5 rounded-md ${statusColors[selectedProject.status]}`}>
+              <p className="type-meta font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Status</p>
+              <span className={`type-meta px-2 py-0.5 rounded-md ${statusColors[selectedProject.status]}`}>
                 {selectedProject.status}
               </span>
             </div>
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Area Analyzed</p>
+              <p className="type-meta font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Area Analyzed</p>
               <p className="text-sm font-medium text-white">{selectedProject.area_analyzed_km2} km²</p>
             </div>
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Candidate Changes</p>
+              <p className="type-meta font-semibold uppercase tracking-[.1em] text-slate-500 mb-1">Candidate Changes</p>
               <p className="text-sm font-medium text-white">{selectedProject.candidate_changes}</p>
             </div>
           </div>
-          <p className="mt-4 text-xs text-slate-400">{selectedProject.description}</p>
+          <p className="mt-4 type-detail text-slate-300">{selectedProject.description}</p>
         </section>
       )}
     </div>
